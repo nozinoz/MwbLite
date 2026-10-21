@@ -183,7 +183,21 @@ namespace MouseWithoutBorders.Lite
             grid.Controls.Add(NewLabel("This PC:"));
             grid.Controls.Add(new Label { Text = LiteConfig.NormalizeName(Environment.MachineName), AutoSize = true, Font = new Font(Font, FontStyle.Bold), Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 3, 3) });
 
-            grid.Controls.Add(NewLabel("Security key:"));
+            grid.Controls.Add(NewLabel("Pair a PC:"));
+            var pairRow = NewFlow();
+            pairRow.Controls.Add(NewButton("Add a PC…", (s, e) => RunPairing(host: true)));
+            pairRow.Controls.Add(NewButton("Join…", (s, e) => RunPairing(host: false)));
+            grid.Controls.Add(pairRow);
+
+            grid.Controls.Add(new Label());
+            grid.Controls.Add(NewHint("Press Add a PC… here and Join… on the new PC; both show a code to compare. The new PC gets this group's security key and layout."));
+
+            return NewGroup("Pairing", grid);
+        }
+
+        // The shared security key: set by pairing, so it lives under Advanced (see README "How pairing works").
+        private Control BuildKeyRow()
+        {
             var keyRow = NewFlow();
             keyBox.Width = em * 16;
             keyBox.Font = new Font(FontFamily.GenericMonospace, Font.Size);
@@ -191,9 +205,14 @@ namespace MouseWithoutBorders.Lite
             showKey.Text = "Show";
             showKey.AutoSize = true;
             showKey.CheckedChanged += (s, e) => keyBox.UseSystemPasswordChar = !showKey.Checked;
-            var generate = NewButton("Generate", (s, e) =>
+            var reset = NewButton("Reset pairing…", (s, e) =>
             {
-                if (keyBox.Text.Length == 0 || MessageBox.Show(this, "Replace the key? Every PC must then use the new key.", Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Question) == DialogResult.OK)
+                if (keyBox.Text.Length == 0 || MessageBox.Show(
+                    this,
+                    "Create a new security key for this PC?\r\n\r\nAfter you save, this PC stops working with the others until you pair them again (Add a PC… / Join…). Use this to remove a PC from your group.",
+                    "Reset pairing",
+                    MessageBoxButtons.OKCancel,
+                    MessageBoxIcon.Warning) == DialogResult.OK)
                 {
                     keyBox.Text = Encryption.CreateRandomKey();
                     showKey.Checked = true;
@@ -207,20 +226,8 @@ namespace MouseWithoutBorders.Lite
                     SetStatus("Key copied to the clipboard.", ok: true);
                 }
             });
-            keyRow.Controls.AddRange(new Control[] { keyBox, showKey, generate, copy });
-            grid.Controls.Add(keyRow);
-
-            grid.Controls.Add(new Label());
-            grid.Controls.Add(NewHint("Use exactly the same key on every PC (at least 16 characters), or pair with a code:"));
-
-            grid.Controls.Add(new Label());
-            var pairRow = NewFlow();
-            pairRow.Controls.Add(NewButton("Add a PC…", (s, e) => RunPairing(host: true)));
-            pairRow.Controls.Add(NewButton("Join…", (s, e) => RunPairing(host: false)));
-            pairRow.Controls.Add(NewHint("Add a PC on a PC that is set up; Join on the new PC. Both show a code to compare."));
-            grid.Controls.Add(pairRow);
-
-            return NewGroup("Pairing", grid);
+            keyRow.Controls.AddRange(new Control[] { keyBox, showKey, copy, reset });
+            return keyRow;
         }
 
         private GroupBox BuildMachinesGroup()
@@ -258,7 +265,7 @@ namespace MouseWithoutBorders.Lite
         {
             var grid = NewGrid(1);
             shareClipboard.Text = "Share the clipboard (text and images)";
-            transferFile.Text = "Transfer files (copy/paste or drag, up to 100 MB)";
+            transferFile.Text = "Transfer files and folders (copy/paste up to 100 MB in total; drag and drop any size)";
             transferFile.Margin = new Padding(em * 2, 3, 3, 3);
             startWithWindows.Text = "Start with Windows";
             useService.Text = "Service mode: control the lock screen and UAC prompts (one-time admin install)";
@@ -277,6 +284,11 @@ namespace MouseWithoutBorders.Lite
         {
             var outer = NewGrid(1);
             var grid = NewGrid(2);
+
+            grid.Controls.Add(NewLabel("Security key:"));
+            grid.Controls.Add(BuildKeyRow());
+            grid.Controls.Add(new Label());
+            grid.Controls.Add(NewHint("Shared by all paired PCs and set by pairing; you don't need to type it. At least 16 characters, identical on every PC."));
 
             tcpPort.Minimum = 1024;
             tcpPort.Maximum = 65534;
@@ -527,7 +539,7 @@ namespace MouseWithoutBorders.Lite
             if (errors.Count > 0)
             {
                 SetStatus(string.Join("\r\n", errors.Select(Friendly)), ok: false);
-                if (errors.Any(e => e.StartsWith("advanced.", StringComparison.Ordinal)))
+                if (errors.Any(e => e.StartsWith("advanced.", StringComparison.Ordinal) || e.StartsWith("securityKey", StringComparison.Ordinal)))
                 {
                     SetAdvancedVisible(true);
                 }
@@ -580,7 +592,7 @@ namespace MouseWithoutBorders.Lite
             if (key == "securityKey")
             {
                 // Upstream's message also says the key "must be auto generated", which is not required here.
-                return "Security key: use at least 16 characters (spaces are ignored), or press Generate.";
+                return "Security key (advanced settings): use at least 16 characters (spaces are ignored), or pair the PCs again.";
             }
 
             return label == null ? error : label + ": " + error[(colon + 2)..];

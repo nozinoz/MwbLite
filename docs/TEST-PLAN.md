@@ -36,12 +36,12 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 2.2 | On **A**: Settings > **Add a PC…** | A window says it is waiting for a PC to join. | |
 | 2.3 | On **B**: Settings > **Join…** | Within a few seconds **A**'s name appears in the list. (If not, type A's computer name in the box below the list.) | |
 | 2.4 | On **B**, select A and press **Join**. | Both windows show the **same** 6-digit code. A's window says "B wants to join". | |
-| 2.5 | Press **Codes match** on **A**, then on **B**. | Both windows report success; B's Settings now shows A's key (press Show to compare) and the list `A, B`. A's list shows `A, B`. | |
+| 2.5 | Press **Codes match** on **A**, then on **B**. | Both windows report success; B's Settings now shows A's key (Show advanced settings > Security key > Show, to compare) and the list `A, B`. A's list shows `A, B`. | |
 | 2.6 | Within about 10 s, right-click the tray icon on A. | The menu lists both machine names under Exit (the connected machines). | |
 | 2.7 | **Cancel test:** repeat 2.2–2.4 and press **Cancel** on B at the code step. | A's window says pairing was cancelled on the other PC; nothing changes on either PC. | |
 | 2.8 | **Different-code test (optional):** start Add a PC on A and Join from B, but press Codes match on only one PC and Cancel on the other. | No settings change on either PC. | |
 | 2.9 | If a Windows Firewall prompt appeared on either machine, allow **Private** networks. (With Setup, the rules are added automatically.) | — | |
-| 2.10 | **Wrong key:** in Settings on B, change one character of the key and save. | A and B stop working together (B can't be reached from A). The logs show connection or handshake errors. | |
+| 2.10 | **Wrong key:** in Settings on B, open Show advanced settings, change one character of the security key and save. | A and B stop working together (B can't be reached from A). The logs show connection or handshake errors. | |
 | 2.11 | Pair again with a code (2.2–2.5). Also try typing a 10-character key in Settings and saving. | They reconnect. The short key is refused with a red message. | |
 | 2.12 | **Arrange:** on A, drag B's tile onto A's tile under Machines and layout (order becomes `B, A`) and press Save & apply. Then exit and restart MwbLite on B. | B's Settings shows the new order, both before and after the restart. | |
 ## 3. Cursor crossing the screen edge

@@ -146,9 +146,11 @@ commands do nothing on a PC where Setup installed MwbLite.
 
 Left-click the tray icon, or choose **Settings…**, to edit settings.json without touching JSON.
 
-- **Pairing.** Shows this PC's name. The security key has **Show**, **Generate** (a new random key) and
-  **Copy** buttons. **Add a PC…** / **Join…** pair with a code (see
+- **Pairing.** Shows this PC's name, with **Add a PC…** / **Join…** to pair with a code (see
   [First-time setup](#first-time-setup-pair-with-a-code)).
+- **Security key** (under **Show advanced settings**). It's set by pairing, so you don't need to type it. **Show**
+  and **Copy** are there if you want them. **Reset pairing…** makes a new key: this PC then stops working with the
+  others until they're paired again (a way to remove a PC from the group).
 - **Machines and layout.** Your PCs as tiles in MWB's 4 slots. **Drag a PC** onto another slot to move it there;
   it swaps with whatever is in that slot. **One row** places them left to right; **Two rows (2 × 2)** turns the
   slots into a grid (`[1][2]` over `[3][4]`) for a PC above or below another.
@@ -323,7 +325,7 @@ connected PCs, and each saves it to its own settings.json. MwbLite also pre-load
 machine pool, as upstream's pairing did. Without that, MWB would reorder the layout the first time it met a PC
 it didn't know.
 
-**To remove a PC or revoke a key**, press **Generate** on one PC and pair the PCs you want to keep again (or copy
+**To remove a PC or revoke a key**, press **Reset pairing…** (Settings > Show advanced settings) on one PC and pair the PCs you want to keep again (or copy
 the new key to them). A PC with the old key can no longer connect.
 
 ## What was removed or replaced
