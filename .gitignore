@@ -4,6 +4,7 @@
 /.dotnet/
 /.nuget/
 /dist/
+/out/
 bin/
 obj/
 *.user

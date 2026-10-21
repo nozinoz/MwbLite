@@ -1,0 +1,19 @@
+<Project>
+  <!--
+    Overrides the WiX SDK's empty signing targets. Active only when build.ps1 passes SignOutput=true,
+    SignToolPath (signtool.exe) and SignToolArgs (certificate selection, digest, timestamp server).
+    For the setup.exe, WiX detaches the Burn engine, we sign it, WiX reattaches it, then we sign the bundle.
+  -->
+  <Target Name="SignCabs" Condition="'$(SignToolPath)' != ''">
+    <Exec Command="&quot;$(SignToolPath)&quot; sign $(SignToolArgs) &quot;%(SignCabs.FullPath)&quot;" />
+  </Target>
+  <Target Name="SignMsi" Condition="'$(SignToolPath)' != ''">
+    <Exec Command="&quot;$(SignToolPath)&quot; sign $(SignToolArgs) &quot;%(SignMsi.FullPath)&quot;" />
+  </Target>
+  <Target Name="SignBundleEngine" Condition="'$(SignToolPath)' != ''">
+    <Exec Command="&quot;$(SignToolPath)&quot; sign $(SignToolArgs) &quot;%(SignBundleEngine.FullPath)&quot;" />
+  </Target>
+  <Target Name="SignBundle" Condition="'$(SignToolPath)' != ''">
+    <Exec Command="&quot;$(SignToolPath)&quot; sign $(SignToolArgs) &quot;%(SignBundle.FullPath)&quot;" />
+  </Target>
+</Project>

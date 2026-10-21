@@ -7,18 +7,36 @@
        system-wide) if it is not there yet. The installer script is downloaded from Microsoft and its
        Authenticode signature is verified before it runs.
     2. Builds and runs the unit tests (skip with -SkipTests).
-    3. Publishes self-contained, single-file x64 executables to .\dist:
-         MwbLite.exe         main app (tray), service host, install/uninstall commands
-         MwbLite.Helper.exe  per-user clipboard/drag-drop helper (started by MwbLite.exe)
+    3. Publishes to .\dist:
+         MwbLite-Setup-<version>.exe   installer (wizard, Start menu, Apps entry, service, firewall rule)
+         MwbLite-<version>-x64.msi     the same package for silent installs (msiexec /i ... /qn)
+         portable\                     two single-file exes that run without installing
+    4. Optionally signs everything (-CertThumbprint or -SignToolArgs).
 
     NuGet packages are cached in .\.nuget, the CLI home is .\.dotnet\home, and .NET CLI telemetry is off.
+    The installer is built with the WiX Toolset 5 (from NuGet; nothing to install).
+
+.PARAMETER CertThumbprint
+    SHA-1 thumbprint of a code-signing certificate in the Windows certificate store (works with
+    certificates on hardware tokens). Signs with SHA-256 and an RFC 3161 timestamp.
+
+.PARAMETER SignToolArgs
+    Full argument string for "signtool sign" instead of -CertThumbprint, e.g. for Azure Trusted Signing:
+    "/fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib <path>\Azure.CodeSigning.Dlib.dll /dmdf <path>\metadata.json"
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+.EXAMPLE
+    .\build.cmd -CertThumbprint 0123456789ABCDEF0123456789ABCDEF01234567
 #>
 [CmdletBinding()]
 param(
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$SkipInstaller,
+    [string]$CertThumbprint,
+    [string]$SignToolArgs,
+    [string]$SignToolPath,
+    [string]$TimestampUrl = 'http://timestamp.digicert.com'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,6 +46,7 @@ $root = $PSScriptRoot
 $dotnetDir = Join-Path $root '.dotnet'
 $dotnet = Join-Path $dotnetDir 'dotnet.exe'
 $dist = Join-Path $root 'dist'
+$payload = Join-Path $root 'out\payload'
 $sdkVersion = (Get-Content (Join-Path $root 'global.json') -Raw | ConvertFrom-Json).sdk.version
 
 # Keep the SDK, its state and the package cache inside the repository; no CLI telemetry.
@@ -83,29 +102,89 @@ if ($running) {
     throw "MwbLite is running from $dist (PID $($running.Id -join ', ')). Exit it from the tray menu, then run the build again."
 }
 
-if (Test-Path $dist) {
-    Remove-Item -Recurse -Force $dist
-}
-
-$publishArgs = @('-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '--nologo', '-v', 'minimal',
-    '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true',
-    # No compression: compressed bundles are inflated into private memory at startup (~3x the RAM).
-    '-p:EnableCompressionInSingleFile=false', '-p:DebugType=none', '-o', $dist)
-
-Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\MwbLite.csproj')) + $publishArgs)
-Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\Helper\MwbLite.Helper.csproj')) + $publishArgs)
-
-foreach ($doc in 'LICENSE', 'NOTICE.md', 'README.md') {
-    if (Test-Path (Join-Path $root $doc)) {
-        Copy-Item (Join-Path $root $doc) $dist
+foreach ($dir in $dist, $payload) {
+    if (Test-Path $dir) {
+        Remove-Item -Recurse -Force $dir
     }
 }
 
-$sums = Get-ChildItem $dist -Filter *.exe | ForEach-Object {
-    "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+$version = ([xml](Get-Content (Join-Path $root 'Directory.Build.props') -Raw)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+$portable = Join-Path $dist 'portable'
+$common = @('-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '--nologo', '-v', 'minimal', '-p:DebugType=none')
+
+# a) Portable: two single-file exes. No compression: compressed bundles are inflated into private
+#    memory at startup (~3x the RAM).
+$singleFile = $common + @('-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true',
+    '-p:EnableCompressionInSingleFile=false', '-o', $portable)
+Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\MwbLite.csproj')) + $singleFile)
+Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\Helper\MwbLite.Helper.csproj')) + $singleFile)
+
+# b) Installer payload: both apps in one folder sharing one .NET runtime.
+$folder = $common + @('-p:PublishSingleFile=false', '-o', $payload)
+Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\MwbLite.csproj')) + $folder)
+Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\Helper\MwbLite.Helper.csproj')) + $folder)
+
+# --- 4. Optional code signing -----------------------------------------------------------------
+$signToolArgsResolved = $null
+if ($CertThumbprint -or $SignToolArgs) {
+    if (-not $SignToolPath) {
+        # signtool.exe from Microsoft's Windows SDK build tools package on nuget.org (no SDK install).
+        $stVersion = '10.0.26100.9169'
+        $stDir = Join-Path $root ".nuget\tools\microsoft.windows.sdk.buildtools.$stVersion"
+        $SignToolPath = Join-Path $stDir 'bin\10.0.26100.0\x64\signtool.exe'
+        if (-not (Test-Path $SignToolPath)) {
+            Write-Host "Downloading signtool ($stVersion) from nuget.org ..."
+            New-Item -ItemType Directory -Force -Path $stDir | Out-Null
+            $zip = Join-Path $stDir 'pkg.zip'
+            Invoke-WebRequest -UseBasicParsing -OutFile $zip -Uri "https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.buildtools/$stVersion/microsoft.windows.sdk.buildtools.$stVersion.nupkg"
+            Expand-Archive -Path $zip -DestinationPath $stDir -Force
+            Remove-Item $zip
+        }
+
+        $stSig = Get-AuthenticodeSignature -FilePath $SignToolPath
+        if ($stSig.Status -ne 'Valid' -or $stSig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            throw "signtool.exe signature check failed ($($stSig.Status))."
+        }
+    }
+
+    $signToolArgsResolved = if ($SignToolArgs) { $SignToolArgs } else { "/sha1 $CertThumbprint /fd sha256 /tr $TimestampUrl /td sha256" }
+    Write-Host "Signing with: signtool sign $signToolArgsResolved"
+
+    $toSign = @(
+        (Join-Path $portable 'MwbLite.exe'), (Join-Path $portable 'MwbLite.Helper.exe'),
+        (Join-Path $payload 'MwbLite.exe'), (Join-Path $payload 'MwbLite.dll'),
+        (Join-Path $payload 'MwbLite.Helper.exe'), (Join-Path $payload 'MwbLite.Helper.dll'))
+    foreach ($file in $toSign) {
+        Invoke-Checked $SignToolPath (@('sign') + ($signToolArgsResolved -split ' ' | Where-Object { $_ }) + @($file))
+    }
+}
+
+# --- 5. Installer: MwbLite-Setup.exe + MSI ---------------------------------------------------
+if (-not $SkipInstaller) {
+    $wixArgs = @('build', (Join-Path $root 'installer\MwbLite.Setup.wixproj'), '-c', 'Release', '--nologo', '-v', 'minimal',
+        "-p:ProductVersion=$version", "-p:PayloadDir=$payload")
+    if ($signToolArgsResolved) {
+        $wixArgs += @('-p:SignOutput=true', "-p:SignToolPath=$SignToolPath", "-p:SignToolArgs=$signToolArgsResolved")
+    }
+
+    Invoke-Checked $dotnet $wixArgs
+    $wixOut = Join-Path $root 'installer\bin\Release'
+    Copy-Item (Join-Path $wixOut 'MwbLite-Setup.exe') (Join-Path $dist "MwbLite-Setup-$version.exe")
+    Copy-Item (Join-Path $wixOut 'MwbLite-x64.msi') (Join-Path $dist "MwbLite-$version-x64.msi")
+}
+
+foreach ($doc in 'LICENSE', 'NOTICE.md', 'README.md') {
+    if (Test-Path (Join-Path $root $doc)) {
+        Copy-Item (Join-Path $root $doc) $portable
+    }
+}
+
+$sums = Get-ChildItem $dist -Recurse -Include *.exe, *.msi | ForEach-Object {
+    "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.FullName.Substring($dist.Length + 1)
 }
 $sums | Set-Content -Encoding ASCII (Join-Path $dist 'SHA256SUMS.txt')
 
 Write-Host ''
-Write-Host "Published to $dist"
-Get-ChildItem $dist | Format-Table Name, @{ Name = 'Size (MB)'; Expression = { '{0:N1}' -f ($_.Length / 1MB) } } -AutoSize
+Write-Host "Published MwbLite $version to $dist"
+Get-ChildItem $dist -Recurse -File | Format-Table @{ Name = 'File'; Expression = { $_.FullName.Substring($dist.Length + 1) } },
+    @{ Name = 'Size (MB)'; Expression = { '{0:N1}' -f ($_.Length / 1MB) } } -AutoSize

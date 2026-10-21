@@ -51,6 +51,26 @@ namespace MouseWithoutBorders.Lite
         internal static string ExeDir => Path.GetDirectoryName(Environment.ProcessPath);
 
         /// <summary>
+        /// True when MwbLite was installed by MwbLite-Setup.exe / the MSI (which then owns the service,
+        /// firewall rule and Program Files folder, instead of the "--install" command).
+        /// </summary>
+        internal static bool IsMsiInstalled
+        {
+            get
+            {
+                try
+                {
+                    using var key = Microsoft.Win32.RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry64).OpenSubKey(@"SOFTWARE\" + AppName);
+                    return string.Equals(key?.GetValue("InstallSource") as string, "msi", StringComparison.OrdinalIgnoreCase);
+                }
+                catch (Exception e) when (e is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+                {
+                    return false;
+                }
+            }
+        }
+
+        /// <summary>
         /// Creates (if needed) a directory that only SYSTEM and Administrators can access, and resets
         /// its ACL to exactly that (inheritance from %ProgramData% removed).
         /// </summary>

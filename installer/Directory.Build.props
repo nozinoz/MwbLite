@@ -1,0 +1,10 @@
+<Project>
+  <!-- Stops the app's root Directory.Build.props (.NET target framework, analyzers) applying to the WiX projects. -->
+  <PropertyGroup>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
+    <PayloadDir Condition="'$(PayloadDir)' == ''">$(MSBuildThisFileDirectory)..\out\payload</PayloadDir>
+    <DefineConstants>ProductVersion=$(ProductVersion);PayloadDir=$(PayloadDir);AppIcon=$(MSBuildThisFileDirectory)..\src\App\Logo.ico</DefineConstants>
+    <!-- Optional code signing, see Signing.targets (enabled by build.ps1 -CertThumbprint / -SignToolArgs). -->
+    <CustomAfterWixTargets>$(MSBuildThisFileDirectory)Signing.targets</CustomAfterWixTargets>
+  </PropertyGroup>
+</Project>

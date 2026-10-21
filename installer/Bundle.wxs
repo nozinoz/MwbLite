@@ -1,0 +1,24 @@
+<!--
+  MwbLite-Setup.exe: a WiX Burn bundle around the MwbLite MSI. Shows the licence, installs with one UAC
+  prompt, and offers to launch MwbLite (unelevated) when done. Registers in Settings > Apps as "MwbLite".
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle Name="MwbLite"
+          Manufacturer="MwbLite"
+          Version="$(var.ProductVersion)"
+          UpgradeCode="D495CCAD-0937-4604-B659-4A3607355BE5"
+          IconSourceFile="$(var.AppIcon)">
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication Theme="rtfLicense"
+                                              LicenseFile="License.rtf"
+                                              LaunchTarget="[ProgramFiles64Folder]MwbLite\MwbLite.exe"
+                                              ShowVersion="yes"
+                                              SuppressOptionsUI="yes" />
+    </BootstrapperApplication>
+
+    <Chain>
+      <MsiPackage SourceFile="$(var.MwbLite.Installer.TargetPath)" />
+    </Chain>
+  </Bundle>
+</Wix>

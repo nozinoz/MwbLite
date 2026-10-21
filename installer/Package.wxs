@@ -1,0 +1,95 @@
+<!--
+  MwbLite MSI (per-machine). Wrapped by Bundle.wxs into MwbLite-Setup.exe.
+
+  Installs to C:\Program Files\MwbLite:
+    - the app (self-contained, one shared .NET runtime for MwbLite.exe and MwbLite.Helper.exe)
+    - Start menu shortcuts "MwbLite" and "MwbLite Settings"
+    - the MwbLite.Service service (demand start; local users may start/stop it, as with the install command)
+    - an inbound firewall rule for MwbLite.exe, TCP, local subnet only
+    - HKLM\SOFTWARE\MwbLite\InstallSource=msi (the app then leaves service/firewall management to this package)
+  Uninstall also removes %ProgramData%\MwbLite (the service's copy of the key) and the user's Run entry.
+  Per-user settings (%LOCALAPPDATA%\MwbLite) are kept.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
+  <Package Name="MwbLite"
+           Manufacturer="MwbLite"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="5BC5A0A4-EE2A-441B-B06A-61464F97A468"
+           Scope="perMachine"
+           Compressed="yes">
+    <SummaryInformation Description="MwbLite - standalone Mouse Without Borders" Manufacturer="MwbLite" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." Schedule="afterInstallInitialize" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="MwbLite.ico" SourceFile="$(var.AppIcon)" />
+    <Property Id="ARPPRODUCTICON" Value="MwbLite.ico" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPCOMMENTS" Value="Share one keyboard, mouse and clipboard across Windows PCs. Based on Mouse Without Borders from Microsoft PowerToys (MIT)." />
+
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="MwbLite" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="MwbLite" AllowAbsent="no">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="MainExe" />
+      <ComponentRef Id="InstallMarker" />
+      <ComponentRef Id="StartMenuShortcuts" />
+    </Feature>
+
+    <!-- Close running copies (including the SYSTEM instances) before files are replaced or removed. -->
+    <util:CloseApplication Id="CloseMwbLite" Target="MwbLite.exe" CloseMessage="yes" ElevatedCloseMessage="yes" TerminateProcess="1" RebootPrompt="no" Timeout="3" />
+    <util:CloseApplication Id="CloseMwbLiteHelper" Target="MwbLite.Helper.exe" CloseMessage="yes" TerminateProcess="1" RebootPrompt="no" Timeout="3" />
+
+    <!-- Full uninstall only (not upgrades): remove the user's Run entry and the protected service data. -->
+    <CustomAction Id="RemoveStartupEntry" FileRef="MwbLiteExe" ExeCommand="--remove-startup" Execute="deferred" Impersonate="yes" Return="ignore" />
+    <CustomAction Id="RemoveServiceData" FileRef="MwbLiteExe" ExeCommand="--uninstall-cleanup" Execute="deferred" Impersonate="no" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="RemoveStartupEntry" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="RemoveServiceData" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PayloadDir)\**">
+        <Exclude Files="$(var.PayloadDir)\MwbLite.exe" />
+      </Files>
+    </ComponentGroup>
+
+    <Component Id="MainExe" Directory="INSTALLFOLDER">
+      <File Id="MwbLiteExe" Source="$(var.PayloadDir)\MwbLite.exe" KeyPath="yes">
+        <fw:FirewallException Id="FirewallMwbLite" Name="MwbLite" Description="MwbLite (Mouse Without Borders) connections from PCs on the local network" Protocol="tcp" Scope="localSubnet" Profile="all" />
+      </File>
+
+      <ServiceInstall Id="MwbLiteService"
+                      Name="MwbLite.Service"
+                      DisplayName="MwbLite Service"
+                      Description="Runs MwbLite on the secure desktop so it can control the lock screen and UAC prompts. Started by MwbLite at sign-in when service mode is on."
+                      Type="ownProcess"
+                      Start="demand"
+                      ErrorControl="normal"
+                      Account="LocalSystem"
+                      Arguments="--service"
+                      Vital="yes">
+        <util:PermissionEx User="Users" ServiceStart="yes" ServiceStop="yes" ServiceQueryStatus="yes" ServiceQueryConfig="yes" ServiceInterrogate="yes" />
+      </ServiceInstall>
+      <ServiceControl Id="MwbLiteServiceControl" Name="MwbLite.Service" Stop="both" Remove="uninstall" Wait="yes" />
+    </Component>
+
+    <!-- Start menu shortcuts: own component with an HKCU key path (ICE43/ICE57, standard WiX pattern). -->
+    <Component Id="StartMenuShortcuts" Directory="ProgramMenuFolder">
+      <Shortcut Id="StartMenuApp" Name="MwbLite" Description="Share one keyboard and mouse across PCs" Target="[#MwbLiteExe]" WorkingDirectory="INSTALLFOLDER" />
+      <Shortcut Id="StartMenuSettings" Name="MwbLite Settings" Description="Change MwbLite settings" Target="[#MwbLiteExe]" Arguments="--settings" WorkingDirectory="INSTALLFOLDER" />
+      <RegistryValue Root="HKCU" Key="Software\MwbLite" Name="StartMenuShortcuts" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="InstallMarker" Directory="INSTALLFOLDER">
+      <RegistryValue Root="HKLM" Key="SOFTWARE\MwbLite" Name="InstallSource" Type="string" Value="msi" KeyPath="yes" />
+    </Component>
+  </Fragment>
+</Wix>

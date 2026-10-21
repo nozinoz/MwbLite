@@ -1,0 +1,15 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <!-- MwbLite-Setup.exe (Burn bundle around the MSI). -->
+  <PropertyGroup>
+    <OutputType>Bundle</OutputType>
+    <OutputName>MwbLite-Setup</OutputName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Bundle.wxs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Bal.wixext" />
+    <ProjectReference Include="MwbLite.Installer.wixproj" />
+  </ItemGroup>
+</Project>

@@ -14,7 +14,7 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | # | Step | Expected |
 |---|---|---|
 | 0.1 | In PowerToys, turn **Mouse Without Borders off** (or quit PowerToys). | `netstat -ano \| findstr :1510` shows nothing listening. |
-| 0.2 | Copy `dist\` to each machine, e.g. `C:\Tools\MwbLite\`. Optionally compare `SHA256SUMS.txt` with `Get-FileHash`. | Hashes match. |
+| 0.2 | Copy `MwbLite-Setup-<version>.exe` (from `dist\`) to each machine. Optionally compare it with `SHA256SUMS.txt` using `Get-FileHash`. | Hashes match. |
 | 0.3 | Note each computer's name. In PowerShell: `hostname` | e.g. `MINIPC`, `LAPTOP1`. |
 | 0.4 | Both machines must be on the same network, with that network set to **Private** (Settings > Network > Properties). | — |
 
@@ -22,11 +22,11 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 
 | # | Step | Expected | Result |
 |---|---|---|---|
-| 1.1 | Double-click `MwbLite.exe`. If SmartScreen warns, choose "More info > Run anyway". | Tray icon appears (it may be in the `^` overflow). A balloon says settings.json was created. | |
+| 1.1 | Run `MwbLite-Setup-<version>.exe`. If SmartScreen warns, choose "More info > Run anyway". Accept the licence, press **Install**, approve UAC, then press **Launch**. | Setup finishes without errors. The tray icon appears (it may be in the `^` overflow); a balloon says settings.json was created. **MwbLite** and **MwbLite Settings** are in the Start menu, and **MwbLite** is listed in Settings > Apps > Installed apps. | |
 | 1.2 | Hover the tray icon. | Tooltip shows `[THISPC][][][]`. | |
 | 1.3 | Left-click the icon (or right-click > **Settings…**). | The **MwbLite Settings** window opens. It shows this PC's name, a random (hidden) security key, and this PC in machine slot 1. Right-click > **Open config file** opens the same settings in Notepad. | |
 | 1.4 | Check `%LOCALAPPDATA%\MwbLite\logs\mwblite.log`. | Contains `Keyboard/Mouse hooks installed`, `TCP listening on port: 15100` and `15101`, and `Helper process started`. | |
-| 1.5 | Task Manager > Details. | `MwbLite.exe` and `MwbLite.Helper.exe` are running. No PowerToys processes are needed. | |
+| 1.5 | Task Manager > Details. | `MwbLite.exe` and `MwbLite.Helper.exe` are running from `C:\Program Files\MwbLite`. No PowerToys processes are needed. | |
 
 ## 2. Pairing with the security key
 
@@ -83,9 +83,9 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 
 | # | Step | Expected | Result |
 |---|---|---|---|
-| 7.1 | In Settings, tick **Service mode** and **Start with Windows**, then press **Save & apply**. Answer **Yes** to "Install now?" and approve UAC. (Or run `MwbLite.exe --install` from the dist folder.) | Message: "MwbLite installed to C:\Program Files\MwbLite and started." | |
-| 7.2 | `sc qc MwbLite.Service` | `BINARY_PATH_NAME` is `"C:\Program Files\MwbLite\MwbLite.exe" --service`. | |
-| 7.3 | `netsh advfirewall firewall show rule name=MwbLite` | Inbound, TCP 15100,15101, RemoteIP LocalSubnet. | |
+| 7.1 | In Settings, tick **Service mode** and **Start with Windows**, press **Save & apply**, and approve the UAC prompt. Then Exit MwbLite from the tray and start it again from the Start menu. | No errors. | |
+| 7.2 | `sc qc MwbLite.Service` | `BINARY_PATH_NAME` is `"C:\Program Files\MwbLite\MwbLite.exe" --service`, `START_TYPE` is `DEMAND_START`. | |
+| 7.3 | `netsh advfirewall firewall show rule name=MwbLite` | Inbound, Allow, Protocol TCP, RemoteIP LocalSubnet, Program `C:\Program Files\MwbLite\MwbLite.exe`. | |
 | 7.4 | Task Manager > Details, User name column. | Two `MwbLite.exe` running as **SYSTEM**, plus `MwbLite.Helper.exe` running as you. | |
 | 7.5 | Lock B (Win+L). From A, cross to B and type B's PIN or password on the lock screen. | You can unlock B from A's keyboard. | |
 | 7.6 | On B, open something that triggers UAC (e.g. Services > right-click > Run as admin). Control B from A. | You can click Yes/No on B's UAC prompt from A. | |
@@ -104,7 +104,7 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 
 | # | Step | Expected | Result |
 |---|---|---|---|
-| 9.1 | `MwbLite.exe --uninstall` (from the dist folder), approve UAC. | Service, firewall rule, `C:\Program Files\MwbLite`, `%ProgramData%\MwbLite` and the Run entry are removed. `%LOCALAPPDATA%\MwbLite` stays. | |
+| 9.1 | Settings > Apps > Installed apps > MwbLite > Uninstall, approve UAC. | The service, firewall rule, `C:\Program Files\MwbLite`, the Start menu shortcuts, `%ProgramData%\MwbLite` and the start-with-Windows entry are removed. `%LOCALAPPDATA%\MwbLite` stays. | |
 
 ## Troubleshooting
 

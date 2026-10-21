@@ -14,25 +14,30 @@ input-injection and clipboard code is upstream's, unchanged apart from the lines
 ## Build
 
 Requirements: Windows 10/11 x64, PowerShell 5.1 (built in), internet access for the first build. No Visual
-Studio, C++ tools or system-wide .NET SDK are needed.
+Studio, C++ tools, WiX install or system-wide .NET SDK are needed.
 
 ```bat
 build.cmd
 ```
 
-That single command (a wrapper for `powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1`) does three things:
+That single command (a wrapper for `powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1`) does four things:
 
 1. **Installs the SDK.** It downloads the .NET SDK pinned in `global.json` into `.dotnet\` (portable). The
    Microsoft-signed `dotnet-install.ps1` is checked for a valid signature before it runs.
 2. **Runs the unit tests.** These are upstream's encryption, key-codec, logger and received-file tests plus the
-   config-loader tests. Pass `-SkipTests` to skip them.
-3. **Publishes `dist\`.** The output is two self-contained, single-file x64 executables plus licence files and
-   `SHA256SUMS.txt`.
+   config tests. Pass `-SkipTests` to skip them.
+3. **Publishes the app** twice: as a shared-runtime folder for the installer, and as portable single-file exes.
+4. **Builds the installer** with the [WiX Toolset](https://wixtoolset.org) 5, which comes from NuGet (MS-RL
+   licence). Pass `-SkipInstaller` to skip it.
 
-| File | Size | Role |
+Output in `dist\`:
+
+| File | Size | Use |
 |---|---|---|
-| `MwbLite.exe` | ~177 MB | Tray app and MWB engine. The same exe is the Windows service (`--service`) and the installer (`--install` and related commands). |
-| `MwbLite.Helper.exe` | ~176 MB | Runs as the logged-in user and handles clipboard monitoring, dragging files out, and screen capture. `MwbLite.exe` starts and stops it. |
+| `MwbLite-Setup-<version>.exe` | ~60 MB | **The installer.** Double-click it on each PC. |
+| `MwbLite-<version>-x64.msi` | ~60 MB | The same package as a plain MSI, for silent or scripted installs: `msiexec /i MwbLite-<version>-x64.msi /qn` |
+| `portable\MwbLite.exe`, `portable\MwbLite.Helper.exe` | ~177 MB each | Run without installing (see [Portable use](#portable-use-no-installer)). |
+| `SHA256SUMS.txt` | | Hashes of all of the above. |
 
 The build keeps everything inside the repo folder:
 
@@ -40,58 +45,75 @@ The build keeps everything inside the repo folder:
 - The SDK's CLI state goes to `.dotnet\home`.
 - .NET CLI telemetry is switched off.
 
-The exes are large because each one carries its own .NET runtime. They are deliberately not compressed: a
-compressed single-file exe expands into private memory at startup and used about 3× the RAM. As built, MwbLite
-uses about 27 MB + 15 MB of private memory, compared with about 32 MB + 17 MB for PowerToys' MWB.
+Each portable exe carries its own .NET runtime, so they are large. The installer shares one runtime between both
+programs, so it's about 180 MB once installed. Neither is compressed in memory: as built, MwbLite uses about
+27 MB + 15 MB of private memory, compared with about 32 MB + 17 MB for PowerToys' MWB.
 
-## Install and run
+## Install
 
-Copy the whole `dist\` folder to each PC. **Don't run PowerToys' Mouse Without Borders on the same PC** (turn it
-off in PowerToys): both use TCP ports 15100/15101.
+**Don't run PowerToys' Mouse Without Borders on the same PC** (turn it off in PowerToys): both use TCP ports
+15100/15101.
 
-### Option A: normal mode (no admin)
+### With Setup (recommended)
 
-Run `MwbLite.exe`. On first run it creates `%LOCALAPPDATA%\MwbLite\settings.json` with a random security key and
-shows a balloon. Then left-click the tray icon to open **Settings** (see [Settings window](#settings-window)):
+Run `MwbLite-Setup-<version>.exe` on each PC: accept the licence, press **Install**, approve the UAC prompt,
+then **Launch**. Setup:
+
+- installs to `C:\Program Files\MwbLite` and adds an entry in **Settings > Apps > Installed apps** (Uninstall
+  is there);
+- adds **MwbLite** and **MwbLite Settings** to the Start menu;
+- registers the **MwbLite.Service** Windows service (demand start; local users may start and stop it), used for
+  lock screen and UAC prompt control;
+- adds an inbound Windows Firewall rule for `MwbLite.exe`: TCP, from the **local subnet** only;
+- closes running copies of MwbLite first, so re-running a newer Setup **upgrades in place** and keeps your
+  settings.
+
+**Uninstall** removes all of that, plus `%ProgramData%\MwbLite` and your start-with-Windows entry. Your own
+settings in `%LOCALAPPDATA%\MwbLite` are kept.
+
+### First-time setup (each PC)
+
+MwbLite starts in the tray. On first run it creates `%LOCALAPPDATA%\MwbLite\settings.json` with a random
+security key and shows a balloon. Left-click the tray icon to open **Settings** (see
+[Settings window](#settings-window)):
 
 1. On the first PC, press **Copy** next to the security key. On every other PC, paste that key.
 2. Enter the same computer names, in screen order, on every PC. **Add this PC** fills in the current computer.
-3. Press **Save & apply**. The change takes effect immediately.
+3. Tick **Start with Windows**.
+4. Press **Save & apply**. The change takes effect immediately.
 
-Windows Firewall will ask on first run whether to allow MwbLite. Allow **private networks**.
+### Lock screen and UAC prompts (service mode)
 
-### Option B: installed, with lock screen and UAC prompt support (recommended)
+1. In Settings, tick **Service mode**, press **Save & apply**, and approve the UAC prompt. That copies your
+   settings to `%ProgramData%\MwbLite`, a folder only SYSTEM and Administrators can read (see
+   [Security notes](#security-notes)).
+2. Exit MwbLite from the tray and start it again from the Start menu (or sign out and back in).
 
-1. In Settings, tick **Service mode** and **Start with Windows**, then press **Save & apply**. MwbLite offers the
-   one-time install. Alternatively, set `"useService": true` and `"startWithWindows": true` and run
-   `MwbLite.exe --install`. Approve the UAC prompt. The install:
-   - copies both exes to `C:\Program Files\MwbLite\`;
-   - registers the **MwbLite.Service** Windows service (demand start). It uses the same security descriptor as
-     PowerToys, so you can start it without admin rights;
-   - adds a firewall rule: inbound TCP on `tcpPort` and `tcpPort+1`, for `MwbLite.exe` only, from the
-     **local subnet** only;
-   - copies your settings.json to `%ProgramData%\MwbLite\settings.json`, a folder only SYSTEM and Administrators
-     can read (see [Security notes](#security-notes));
-   - sets the Run key if `startWithWindows` is true, then starts the installed copy.
-3. At logon, the Run entry starts `MwbLite.exe`. Because `useService` is true, that instance starts the service
-   and exits. The service then launches MwbLite as SYSTEM on the secure desktop and on your desktop (exactly as
-   PowerToys does) and stops itself.
-4. After editing settings.json in service mode, use **Reload config** (or run `MwbLite.exe --apply-config`). It
-   asks for UAC approval, copies the file to `%ProgramData%`, and the running instances reload it.
+From then on, at sign-in:
 
-To remove everything `--install` added, run `MwbLite.exe --uninstall`. Your `%LOCALAPPDATA%\MwbLite` settings
-are kept.
+- MwbLite starts the service and exits.
+- The service launches MwbLite as SYSTEM on the secure desktop and on your desktop (exactly as PowerToys does),
+  then stops itself.
+- Later setting changes ask for UAC approval to update the protected copy.
+
+### Portable use (no installer)
+
+Copy `dist\portable\` anywhere and run `MwbLite.exe`. Windows Firewall will ask on first run; allow
+**private networks**. For service mode without Setup, run `MwbLite.exe --install` (UAC). It copies the exes to
+`C:\Program Files\MwbLite`, registers the service, adds a firewall rule for `tcpPort`/`tcpPort+1` from the local
+subnet, and copies your settings to `%ProgramData%`. `MwbLite.exe --uninstall` removes it again. These two
+commands do nothing on a PC where Setup installed MwbLite.
 
 ### Commands
 
 | Command | Admin | What it does |
 |---|---|---|
 | `MwbLite.exe` | no | Run as a tray app. With `useService: true`, it starts the service and exits. |
-| `MwbLite.exe --install` | UAC | Install or update (see above). Safe to re-run. |
-| `MwbLite.exe --apply-config` | UAC | Copy your settings.json to the service's protected copy. |
-| `MwbLite.exe --uninstall` | UAC | Remove the service, firewall rule, Program Files copy, `%ProgramData%\MwbLite` and the Run entry. |
 | `MwbLite.exe --settings` | no | Open the Settings window. |
 | `MwbLite.exe --open-config` | no | Open your settings.json in Notepad. |
+| `MwbLite.exe --apply-config` | UAC | Copy your settings.json to the service's protected copy. |
+| `MwbLite.exe --install` | UAC | Portable only: install service, firewall rule and Program Files copy (see above). |
+| `MwbLite.exe --uninstall` | UAC | Portable only: remove what `--install` added. |
 | `MwbLite.exe --service` | — | Service entry point. The Service Control Manager uses this; don't run it by hand. |
 
 ### Tray menu
@@ -275,8 +297,8 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
   config" start `MwbLite.exe --settings` / `--open-config` / `--apply-config` with **your** token.
 - **Install location:** the service binary lives in `C:\Program Files\MwbLite` (admin-only write), never in a
   user-writable folder.
-- **Firewall:** the rule allows only `MwbLite.exe` on the two MWB ports, from the local subnet. Upstream allowed
-  the program from any address.
+- **Firewall:** the rule (Setup or `--install`) allows only `MwbLite.exe`, TCP, from the local subnet. Upstream
+  allowed the program from any address.
 - **No outbound calls** other than to the MWB peers you configure: no telemetry, update checks or crash
   reporting.
 
@@ -292,13 +314,49 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
 - **Service mode starts at logon.** The service is demand-start (as in PowerToys) and is started by the Run entry
   when you log on. Lock screen and UAC control therefore work after your first logon, not at the cold-boot login
   screen.
-- **Unsigned executables.** SmartScreen will warn on first run. Smart App Control (if enabled) will block them.
-- **Large exes** (~177 MB each), because each carries its own .NET runtime.
-- **x64 only.**
+- **Not code-signed yet.** SmartScreen shows "Windows protected your PC" on first run (More info > Run anyway),
+  and Smart App Control, if turned on, blocks MwbLite outright. See
+  [Sharing MwbLite with other people](#sharing-mwblite-with-other-people).
+- **Local network only.** The firewall rule admits peers on the same subnet, which covers a typical home or
+  small-office network. PCs on different subnets or VLANs, or connected over a VPN (e.g. Tailscale), need a
+  wider firewall rule, added by an administrator.
+- **x64 only.** Windows on ARM PCs would run the x64 build under emulation; that is untested.
 - **Not tested against stock PowerToys MWB.** The wire protocol and key derivation are unchanged, so mixed setups
   should work, but this has not been tested.
 - **Updates are manual.** See below.
 - **Notepad is always used** by "Open config file", not your default `.json` editor.
+
+## Sharing MwbLite with other people
+
+MwbLite is MIT licensed, so you can give `MwbLite-Setup-<version>.exe` to anyone. Keep the `LICENSE` and
+`NOTICE.md` that ship with it (Setup also shows the licence), and don't present it as a Microsoft product.
+
+### Code signing
+
+Windows decides how much to trust a downloaded program from its **digital signature**. Unsigned, MwbLite works,
+but other people will see SmartScreen warnings, and PCs with **Smart App Control** turned on will refuse to run
+it. Signing needs a code-signing certificate issued to you after an identity check. That can't be produced here;
+you obtain it. The build is ready for it.
+
+| Option | Roughly | Notes |
+|---|---|---|
+| **Azure Trusted Signing** (Microsoft) | Low monthly fee | Cheapest publicly trusted option. Identity validation is required, and eligibility for individuals depends on country; check the current Microsoft rules. |
+| **OV code-signing certificate** from a CA (e.g. Sectigo, SSL.com, DigiCert) | Low hundreds of USD per year | Since 2023 the key must live on a hardware token or cloud HSM. |
+| **Self-signed certificate** | Free | Only trusted on PCs where you import it. Fine for your own PCs, useless for strangers. |
+
+None of these makes the SmartScreen warning disappear on day one. SmartScreen also builds reputation per
+publisher from downloads, so a new signature still warns for a while.
+
+Once you have a certificate, sign everything (both exes and their DLLs, the MSI, its cabinet, and the Setup engine
+and bundle) in the same build:
+
+```bat
+build.cmd -CertThumbprint <SHA-1 thumbprint of your certificate>
+build.cmd -SignToolArgs "/fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib <path>\Azure.CodeSigning.Dlib.dll /dmdf <path>\metadata.json"
+```
+
+`signtool.exe` is fetched from Microsoft's Windows SDK build-tools package on nuget.org (signature-checked), so
+the Windows SDK doesn't need to be installed.
 
 ## Updating from upstream
 

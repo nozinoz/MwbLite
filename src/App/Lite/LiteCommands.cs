@@ -65,16 +65,34 @@ namespace MouseWithoutBorders.Lite
                         return 0;
 
                     case "--install":
+                    case "--uninstall":
                         LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");
-                        return Install();
+                        if (LitePaths.IsMsiInstalled)
+                        {
+                            Show("MwbLite was installed with MwbLite-Setup.exe. To repair or remove it, use Settings > Apps > Installed apps > MwbLite.", MessageBoxIcon.Information);
+                            return 0;
+                        }
+
+                        return cmd == "--install" ? Install() : Uninstall();
 
                     case "--apply-config":
                         LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");
                         return ApplyConfig();
 
-                    case "--uninstall":
-                        LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");
-                        return Uninstall();
+                    // Run by the Setup uninstaller as the installing user: remove the per-user start-with-Windows entry.
+                    case "--remove-startup":
+                        LiteStartup.Sync(false, LitePaths.ExePath);
+                        return 0;
+
+                    // Run by the Setup uninstaller as SYSTEM: remove %ProgramData%\MwbLite (service copy of the key, logs).
+                    case "--uninstall-cleanup":
+                        if (!IsElevated())
+                        {
+                            return 5;
+                        }
+
+                        DeleteDirectory(LitePaths.ServiceDir);
+                        return 0;
 
                     case "--install-elevated":
                     case "--apply-config-elevated":
@@ -278,7 +296,9 @@ namespace MouseWithoutBorders.Lite
         private static void SetFirewallRuleIfInstalled(int tcpPort)
         {
             string exe = Path.Combine(LitePaths.InstallDir, MainExeName);
-            if (File.Exists(exe))
+
+            // With Setup, the MSI owns its own (program-wide, local-subnet) firewall rule.
+            if (File.Exists(exe) && !LitePaths.IsMsiInstalled)
             {
                 SetFirewallRule(exe, tcpPort);
             }

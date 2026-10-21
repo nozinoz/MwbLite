@@ -1,0 +1,17 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <!-- The MSI. Build through MwbLite.Setup.wixproj (or build.ps1), which passes ProductVersion and PayloadDir. -->
+  <PropertyGroup>
+    <OutputName>MwbLite-x64</OutputName>
+    <!-- ICE69: Start menu shortcuts target MwbLite.exe from another component of the same feature (harmless). -->
+    <SuppressIces>ICE69</SuppressIces>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Package.wxs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" />
+    <PackageReference Include="WixToolset.Firewall.wixext" />
+  </ItemGroup>
+</Project>

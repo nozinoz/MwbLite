@@ -1,0 +1,11 @@
+<Project>
+  <!-- WiX 5.0.2: MS-RL licence. (WiX 6+ ships under the OSMF EULA, which requires acceptance.) -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="WixToolset.Util.wixext" Version="5.0.2" />
+    <PackageVersion Include="WixToolset.Firewall.wixext" Version="5.0.2" />
+    <PackageVersion Include="WixToolset.Bal.wixext" Version="5.0.2" />
+  </ItemGroup>
+</Project>
