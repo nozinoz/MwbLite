@@ -126,7 +126,8 @@ namespace MouseWithoutBorders
 
                 if (ar.Length > 0)
                 {
-                    string fileName = ar.GetValue(0).ToString();
+                    // MwbLite: folders / several files are sent as one bundle (Lite.LiteFileBundle); a single file as before.
+                    string fileName = Lite.LiteFileBundle.Prepare((string[])o, limitTotalSize: false) ?? ar.GetValue(0).ToString();
                     Hide();
 
                     try
@@ -314,10 +315,12 @@ namespace MouseWithoutBorders
                         {
                             if (files.Count > 0)
                             {
-                                data = files[0];
+                                // MwbLite: folders / several files are sent as one bundle (100 MB in total); a single file as before.
+                                string bundle = Lite.LiteFileBundle.Prepare(System.Linq.Enumerable.Cast<string>(files), limitTotalSize: true);
+                                data = bundle ?? files[0];
                                 isFile = true;
 
-                                SendLog("File from clipboard: " + files[0]);
+                                SendLog("File from clipboard: " + (bundle ?? files[0]));
                             }
                             else
                             {

@@ -18,6 +18,7 @@
     <Compile Include="..\Class\IpcChannel.cs" Link="IpcChannel.cs" />
     <Compile Include="..\Core\IpcChannelHelper.cs" Link="IpcChannelHelper.cs" />
     <Compile Include="..\Lite\LiteLog.cs" Link="LiteLog.cs" />
+    <Compile Include="..\Lite\LiteFileBundle.cs" Link="LiteFileBundle.cs" />
   </ItemGroup>
 
   <ItemGroup>

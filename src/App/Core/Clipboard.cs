@@ -828,11 +828,18 @@ internal static class Clipboard
                 {
                     if (postAct.Equals("desktop", StringComparison.OrdinalIgnoreCase))
                     {
+                        // MwbLite: unpack a folder / several files that were sent as one bundle.
+                        string received = Path.GetFileName(fileName);
+                        if (Lite.LiteFileBundle.IsBundle(tempFile))
+                        {
+                            _ = Launch.ImpersonateLoggedOnUserAndDoSomething(() => Lite.LiteFileBundle.TryExtract(tempFile, savingFolder, out _, out received));
+                        }
+
                         toolTipText = string.Format(
                             CultureInfo.CurrentCulture,
                             "{0} {1} received from {2}!",
                             sizeText,
-                            Path.GetFileName(fileName),
+                            received,
                             remoteMachine);
 
                         _ = Launch.ImpersonateLoggedOnUserAndDoSomething(() =>
@@ -863,12 +870,30 @@ internal static class Clipboard
                         {
                             tempFile,
                         };
+
+                        // MwbLite: a bundle is unpacked and all of its items go on the clipboard (paste with Ctrl+V).
+                        string received = Path.GetFileName(fileName);
+                        if (Lite.LiteFileBundle.IsBundle(tempFile))
+                        {
+                            _ = Launch.ImpersonateLoggedOnUserAndDoSomething(() =>
+                            {
+                                string storage = Path.GetDirectoryName(tempFile);
+                                Lite.LiteFileBundle.CleanOldBundleFolders(storage);
+                                string target = Path.Combine(storage, "bundle-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture));
+                                if (Lite.LiteFileBundle.TryExtract(tempFile, target, out var items, out received))
+                                {
+                                    filePaths.Clear();
+                                    filePaths.AddRange(items.ToArray());
+                                }
+                            });
+                        }
+
                         Clipboard.SetFileDropList(filePaths);
                         toolTipText = string.Format(
                             CultureInfo.CurrentCulture,
                             "{0} {1} from {2} is in Clipboard.",
                             sizeText,
-                            Path.GetFileName(fileName),
+                            received,
                             remoteMachine);
                     }
                 }

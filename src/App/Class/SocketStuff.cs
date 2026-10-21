@@ -1687,17 +1687,24 @@ namespace MouseWithoutBorders.Class
 
                 if (!Launch.ImpersonateLoggedOnUserAndDoSomething(() =>
                 {
-                    if (!File.Exists(Clipboard.LastDragDropFile))
+                    // MwbLite: a folder / several files arrive here as a bundle manifest; send its zip (one file, as before).
+                    string source = Lite.LiteFileBundle.ResolveForSend(Clipboard.LastDragDropFile, out string bundleError);
+
+                    if (bundleError != null)
                     {
-                        headerString = Directory.Exists(Clipboard.LastDragDropFile)
-                            ? $"{0}*{Clipboard.LastDragDropFile} - Folder is not supported, zip it first!"
-                            : Clipboard.LastDragDropFile.Contains("- File too big")
-                                ? $"{0}*{Clipboard.LastDragDropFile}"
-                                : $"{0}*{Clipboard.LastDragDropFile} not found!";
+                        headerString = $"{0}*{bundleError}";
+                    }
+                    else if (!File.Exists(source))
+                    {
+                        headerString = Directory.Exists(source)
+                            ? $"{0}*{source} - Folder is not supported, zip it first!"
+                            : source.Contains("- File too big")
+                                ? $"{0}*{source}"
+                                : $"{0}*{source} not found!";
                     }
                     else
                     {
-                        fileName = Clipboard.LastDragDropFile;
+                        fileName = source;
                         headerString = $"{new FileInfo(fileName).Length}*{fileName}";
                     }
                 }))

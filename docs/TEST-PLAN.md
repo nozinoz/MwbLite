@@ -63,9 +63,13 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 4.1 | On A, copy some text (Ctrl+C), move to B, paste (Ctrl+V). | The same text is pasted on B. | |
 | 4.2 | Copy text on B, move to A, paste. | Works in the other direction too. | |
 | 4.3 | Copy a screenshot (Win+Shift+S) on A and paste into Paint on B. | Image is pasted. | |
-| 4.4 | **File copy:** on A, select a file of 1–50 MB in Explorer and press Ctrl+C. Move the cursor to B. | When the cursor arrives on B, the file is saved to `Desktop\MouseWithoutBorders` on B and that folder opens. A file over 100 MB is refused this way (use drag and drop). | |
-| 4.5 | **Drag and drop:** drag a file from A's Explorer across the edge and drop it on B's desktop. | File arrives on B. | |
+| 4.4 | **File copy:** on A, select one file (1–50 MB) in Explorer and press Ctrl+C. Move the cursor to B, click B's desktop or an Explorer folder and press **Ctrl+V**. | The file is pasted on B. | |
+| 4.5 | **Drag and drop:** drag a file from A's Explorer across the edge and drop it on B's desktop. | The file arrives in `Desktop\MouseWithoutBorders` on B and that folder opens. | |
 | 4.6 | In Settings on A, untick **Share the clipboard** and save. Repeat 4.1. | Text is **not** transferred. Tick it again. | |
+| 4.7 | **Folder + files (copy):** on A, select a folder (with subfolders) **and** two files, Ctrl+C, move to B, Ctrl+V in an Explorer folder. | All three items are pasted, with the folder's structure intact. The balloon on B names the first item "and 2 more". | |
+| 4.8 | **Folder (drag):** drag a folder from A onto B's desktop. | The folder appears inside `Desktop\MouseWithoutBorders` on B with all its contents. Drag it again: a second copy arrives as "Folder (2)". | |
+| 4.9 | **Too big for copy:** copy a folder of more than 100 MB on A and move to B. | B shows "… File too big (more than 100 MB in total), please drag and drop it instead!". Dragging the same folder works. | |
+| 4.10 | **Large folder (drag, optional):** drag a folder of several GB from A to B. | It arrives. If B says "still being packed", drop again a little later. | |
 
 ## 5. One machine sleeps
 

@@ -191,19 +191,30 @@ then press **Save & apply**. The cursor moves to a PC by leaving the screen on t
 
 ## Copying files between PCs
 
-This is MWB's own file transfer, unchanged. It needs **Share the clipboard** and **Transfer files** turned on
-(both are on by default).
+It needs **Share the clipboard** and **Transfer files** turned on (both are on by default). You can send a
+single file, **several files, or folders**, in either direction between any two paired PCs.
 
-- **Copy and paste:** select a file in Explorer and press Ctrl+C, then move to the other PC. The file is fetched
-  when you switch, saved to the **`MouseWithoutBorders`** folder on that PC's desktop, and the folder opens.
-  Limit: **one file, up to 100 MB**.
-- **Drag and drop:** drag a file out of Explorer, across the screen edge onto the other PC, and drop it. It also
-  arrives in `Desktop\MouseWithoutBorders`, and there's **no 100 MB limit**.
-- **Not supported:** folders (zip them first) and several files at once (one at a time). Files always arrive in
-  `Desktop\MouseWithoutBorders`, not where you drop them.
-- Both directions work, between any two paired PCs. Transfers use the same encrypted connection as everything
-  else.
+- **Copy and paste.** In Explorer, select files and/or folders and press Ctrl+C. Move the cursor to the other PC,
+  click where you want them (a folder in Explorer, or the desktop) and press **Ctrl+V**.
+  - The data is fetched when you switch to the other PC. It's kept in a temporary folder
+    (`Desktop\MwbLite\ScreenCaptures`, cleared after a day) and put on that PC's clipboard, so you can paste it
+    anywhere.
+  - Limit: **100 MB in total**.
+- **Drag and drop.** Drag files and/or folders out of Explorer, across the screen edge onto the other PC, and
+  drop them. They are saved to the **`MouseWithoutBorders`** folder on that PC's desktop, which then opens.
+  There's **no size limit**.
 
+**How folders and multiple files work.** MWB itself sends exactly one file at a time, and that is unchanged.
+MwbLite packs a selection with folders or several files into one zip as soon as you copy it or start dragging. It
+sends that zip as the one file, and the receiving MwbLite unpacks it again: folder structure, empty folders and
+hidden files are kept, and existing items get "(2)" rather than being overwritten. A PC running stock Mouse
+Without Borders would receive the zip itself.
+
+**Very large folders** (several GB) take time to pack. If you drop before packing finishes, the other PC shows
+"…still being packed. Try again in a moment"; drop again once it's ready. Drag and drop sends the zip
+uncompressed, for speed. Copy and paste compresses it.
+
+All transfers use the same encrypted connection as everything else.
 ## Configuration: `%LOCALAPPDATA%\MwbLite\settings.json`
 
 The file is JSON. `//` comments and trailing commas are allowed. Three things write it:
@@ -337,7 +348,7 @@ No PowerToys DLLs or projects are referenced. The build contains no C++.
 **Engine files left byte-for-byte unchanged:**
 
 - **Crypto and keys:** `Core/Encryption.cs`, `Class/PairingKeyCodec.cs`, `Class/PassthroughPairingKeyCodec.cs`, `Class/DpapiPairingKeyCodec.cs`.
-- **Network and protocol:** `Class/SocketStuff.cs`, `Class/TcpServer.cs`, `Core/Receiver.cs`, `Core/Package*.cs`.
+- **Network and protocol:** `Class/TcpServer.cs`, `Core/Receiver.cs`, `Core/Package*.cs`. (`Class/SocketStuff.cs` has one small edit, listed below; the bytes on the wire are unchanged.)
 - **Input injection:** `Class/InputSimulation.cs`.
 - **Process launch and native calls:** `Core/Launch.cs`, `Core/WinAPI.cs`, `Class/NativeMethods.cs`.
 
@@ -347,6 +358,7 @@ No PowerToys DLLs or projects are referenced. The build contains no C++.
 |---|---|---|
 | `Class/InputHook.cs` | The module handle passed to `SetWindowsHookEx` is now `GetModuleHandle(NULL)` instead of `Marshal.GetHINSTANCE(module)`. | In a single-file exe `GetHINSTANCE` returns -1, so the keyboard and mouse hooks failed with error 126. Verified: they now install. |
 | `Core/Clipboard.cs`, `Core/DragDrop.cs` | One telemetry line removed from each. | No telemetry. |
+| `Class/SocketStuff.cs` (send step), `Core/Clipboard.cs` (receive step), `Helper/FormHelper.cs` (copy and drag) | A selection with folders or several files is announced as a bundle. The sender asks `Lite/LiteFileBundle` for the bundle's zip, and the receiver unpacks it. A single file takes the original path. | Copying folders and several files at once. MWB still transfers exactly one file, with the same header and data. |
 | `Core/Helper.cs`, `Helper/FormHelper.Designer.cs`, `Class/IClipboardHelper.cs` | Helper process and window renamed to `MwbLite.Helper` / "MwbLite Helper". Local clipboard pipe renamed to `MwbLite/ClipboardHelper`. `EventLogger` now writes to the log file. | These names were shared with PowerToys MWB. With both installed, MwbLite found PowerToys' helper window, and the pipe could connect to the wrong app. They are local IPC between MwbLite's own two processes, not the network protocol. |
 
 The other edited files are the PowerToys seams: `Class/Program.cs`, `Class/Setting.cs` (same members, new backing
