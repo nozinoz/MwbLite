@@ -9,7 +9,6 @@ using System.IO;
 using System.Threading;
 using System.Windows.Forms;
 
-using Microsoft.PowerToys.Telemetry;
 using MouseWithoutBorders.Class;
 
 // <summary>
@@ -287,7 +286,6 @@ internal static class DragDrop
             _ = NativeMethods.PostMessage(Common.MainForm.Handle, NativeMethods.WM_HIDE_DRAG_DROP, (IntPtr)0, (IntPtr)0);
         });
 
-        PowerToysTelemetry.Log.WriteEvent(new MouseWithoutBorders.Telemetry.MouseWithoutBordersDragAndDropEvent());
         Clipboard.GetRemoteClipboard("desktop");
     }
 

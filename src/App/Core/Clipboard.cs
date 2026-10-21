@@ -17,7 +17,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-using Microsoft.PowerToys.Telemetry;
 using MouseWithoutBorders.Class;
 using MouseWithoutBorders.Exceptions;
 
@@ -803,7 +802,6 @@ internal static class Clipboard
                     ? (receivedLength / 1024).ToString(CultureInfo.CurrentCulture) + "KB"
                     : receivedLength.ToString(CultureInfo.CurrentCulture) + "Bytes";
 
-                PowerToysTelemetry.Log.WriteEvent(new MouseWithoutBorders.Telemetry.MouseWithoutBordersClipboardFileTransferEvent());
 
                 if (fileName.StartsWith("image", StringComparison.CurrentCultureIgnoreCase))
                 {

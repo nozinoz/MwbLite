@@ -3,22 +3,14 @@
 // See the LICENSE file in the project root for more information.
 
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
-using System.IO;
-using System.IO.Abstractions;
 using System.Linq;
 using System.Security.Cryptography;
-using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-using global::PowerToys.GPOWrapper;
 using Microsoft.PowerToys.Settings.UI.Library;
-using Microsoft.PowerToys.Settings.UI.Library.Utilities;
 
 // <summary>
 //     Application settings.
@@ -27,18 +19,17 @@ using Microsoft.PowerToys.Settings.UI.Library.Utilities;
 //     2008 created by Truong Do (ductdo).
 //     2009-... modified by Truong Do (TruongDo).
 //     2023- Included in PowerToys.
+//     MwbLite: backed by a local settings.json (LiteConfig, read-only to the app) plus state.json
+//              (LiteState, runtime values). The PowerToys settings library, its file watcher and all
+//              Group Policy (GPOWrapper) overrides were removed. Member names are unchanged so the rest
+//              of the upstream code compiles as-is.
 // </history>
-using Microsoft.Win32;
 using MouseWithoutBorders.Core;
-using Settings.UI.Library.Attributes;
+using MouseWithoutBorders.Lite;
 
 using Lock = System.Threading.Lock;
-using SettingsHelper = Microsoft.PowerToys.Settings.UI.Library.Utilities.Helper;
 
 [module: SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Scope = "member", Target = "MouseWithoutBorders.Properties.Setting.Values.#LoadIntSetting(System.String,System.Int32)", Justification = "Dotnet port with style preservation")]
-[module: SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Scope = "member", Target = "MouseWithoutBorders.Properties.Setting.Values.#SaveSetting(System.String,System.Object)", Justification = "Dotnet port with style preservation")]
-[module: SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Scope = "member", Target = "MouseWithoutBorders.Properties.Setting.Values.#LoadStringSetting(System.String,System.String)", Justification = "Dotnet port with style preservation")]
-[module: SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Scope = "member", Target = "MouseWithoutBorders.Properties.Setting.Values.#SaveSettingQWord(System.String,System.Int64)", Justification = "Dotnet port with style preservation")]
 
 namespace MouseWithoutBorders.Class
 {
@@ -46,14 +37,18 @@ namespace MouseWithoutBorders.Class
     {
         internal bool Changed;
 
-        private readonly SettingsUtils _settingsUtils;
         private readonly Lock _loadingSettingsLock = new Lock();
         private readonly Lock _pairingKeyLock = new Lock();
-        private readonly IFileSystemWatcher _watcher;
+        private readonly Lock _saveLock = new Lock();
         private readonly IPairingKeyCodec _pairingKeyCodec;
+        private readonly string _settingsFile;
+        private readonly string _stateFile;
 
-        private MouseWithoutBordersProperties _properties;
-        private MouseWithoutBordersSettings _settings;
+        // Effective configuration. Values MWB changes at runtime (e.g. a machine matrix received from a
+        // peer, Easy Mouse toggled by hotkey) are applied to this in-memory copy only; the user's
+        // settings.json is never rewritten. "Reload config" replaces it from disk.
+        private LiteConfig _config;
+        private LiteState _state;
 
         internal static bool IsProtectedMode
         {
@@ -67,181 +62,185 @@ namespace MouseWithoutBorders.Class
         // Avoid instantly saving every change to the file when updating properties.
         public bool PauseInstantSaving { get; set; }
 
-        private void UpdateSettingsFromJson()
+        /// <summary>Problems found the last time settings.json was loaded (empty if it loaded cleanly).</summary>
+        internal IReadOnlyList<string> ConfigErrors { get; private set; } = Array.Empty<string>();
+
+        internal IReadOnlyList<string> ConfigWarnings { get; private set; } = Array.Empty<string>();
+
+        internal bool CreatedDefaultConfig { get; private set; }
+
+        internal string SettingsFile => _settingsFile;
+
+        internal bool StartWithWindows
+        {
+            get
+            {
+                lock (_loadingSettingsLock)
+                {
+                    return _config.StartWithWindows;
+                }
+            }
+        }
+
+        internal Settings(IPairingKeyCodec pairingKeyCodec)
+            : this(pairingKeyCodec, LitePaths.SettingsFile, LitePaths.StateFile)
+        {
+        }
+
+        internal Settings(IPairingKeyCodec pairingKeyCodec, string settingsFile, string stateFile)
+        {
+            ArgumentNullException.ThrowIfNull(pairingKeyCodec);
+            _pairingKeyCodec = pairingKeyCodec;
+            _settingsFile = settingsFile;
+            _stateFile = stateFile;
+            _state = LiteState.Load(_stateFile);
+            _config = LoadConfigForStartup();
+        }
+
+        private LiteConfig LoadConfigForStartup()
         {
             try
             {
-                if (!_settingsUtils.SettingsExists("MouseWithoutBorders"))
+                // The SYSTEM instances read a copy written by the elevated --apply-config command and
+                // never create it themselves.
+                if (!IsProtectedMode && LiteConfig.WriteDefaultIfMissing(_settingsFile))
                 {
-                    var defaultSettings = new MouseWithoutBordersSettings();
-                    if (!Common.RunOnLogonDesktop)
-                    {
-                        defaultSettings.Save(_settingsUtils);
-                    }
-                }
-
-                var settings = _settingsUtils.GetSettingsOrDefault<MouseWithoutBordersSettings>("MouseWithoutBorders");
-                if (settings != null)
-                {
-                    PauseInstantSaving = true;
-
-                    ApplyLoadedSettings(
-                        settings,
-                        () => CustomCursor.ShowFakeMouseCursor(int.MinValue, int.MinValue),
-                        () => MachineStuff.MachineMatrix = null,
-                        MachineStuff.SendMachineMatrix,
-                        SaveSettings);
+                    CreatedDefaultConfig = true;
+                    LiteLog.Write(nameof(Settings), $"Created default {_settingsFile}");
                 }
             }
-            catch (IOException ex)
+            catch (Exception e)
             {
-                EventLogger.LogEvent($"Failed to read settings: {ex.Message}", System.Diagnostics.EventLogEntryType.Error);
+                LiteLog.Write(nameof(Settings), $"Cannot create default {_settingsFile}: {e.Message}");
             }
 
-            PauseInstantSaving = false;
+            var cfg = LiteConfig.TryLoad(_settingsFile, out var errors, out var warnings);
+            ConfigErrors = errors;
+            ConfigWarnings = warnings;
+            foreach (string w in warnings)
+            {
+                LiteLog.Write(nameof(Settings), "Config warning: " + w);
+            }
+
+            if (cfg != null)
+            {
+                return cfg;
+            }
+
+            foreach (string err in errors)
+            {
+                LiteLog.Write(nameof(Settings), "Config error: " + err);
+            }
+
+            // Unusable config: run with defaults and a random, unshared key so nothing can connect
+            // until the file is fixed and reloaded.
+            return LiteConfig.CreateDefault();
         }
 
-        // Exercise the reload ordering with substitute cursor/cache/network/save effects in tests.
-        // Production supplies the real effects above; adoption and comparison stay in this path.
-        internal void ApplyLoadedSettings(
-            MouseWithoutBordersSettings settings,
-            Action hideFakeMouseCursor,
-            Action invalidateMachineMatrix,
-            Action sendMachineMatrix,
-            Action saveSettings)
+        /// <summary>
+        /// Re-reads settings.json and applies it, following the same order upstream used when the
+        /// PowerToys Settings app changed the file. Returns false (keeping the current settings) if the
+        /// file is invalid.
+        /// </summary>
+        internal bool Reload(out IReadOnlyList<string> errors, out IReadOnlyList<string> warnings, out bool restartNeeded)
         {
-            var last_properties = _properties;
+            var cfg = LiteConfig.TryLoad(_settingsFile, out var errs, out var warns);
+            errors = errs;
+            warnings = warns;
+            restartNeeded = false;
+            ConfigErrors = errs;
+            ConfigWarnings = warns;
 
-            _settings = settings;
-            _properties = settings.Properties;
+            if (cfg == null)
+            {
+                LiteLog.Write(nameof(Settings), "Reload rejected: " + string.Join(" | ", errs));
+                return false;
+            }
 
-            // Keep track of the need to resend the machine matrix.
+            LiteConfig last;
+            lock (_loadingSettingsLock)
+            {
+                last = _config;
+                _config = cfg;
+            }
+
+            restartNeeded = last.Advanced.TcpPort != cfg.Advanced.TcpPort || last.UseService != cfg.UseService;
+
             bool shouldSendMachineMatrix = false;
 
-            // Keep track of the need to save into the settings file.
-            bool shouldSaveNewSettingsValues = false;
-
-            if (last_properties != null)
+            // Same as in CheckBoxCircle_CheckedChanged
+            if (last.Layout.WrapMouse != cfg.Layout.WrapMouse || last.Layout.OneRow != cfg.Layout.OneRow)
             {
-                // Same as in CheckBoxCircle_CheckedChanged
-                if (last_properties.WrapMouse != _settings.Properties.WrapMouse)
-                {
-                    shouldSendMachineMatrix = true;
-                }
-
-                // Same as CheckBoxDrawMouse_CheckedChanged
-                if (last_properties.DrawMouseCursor != _settings.Properties.DrawMouseCursor && !_settings.Properties.DrawMouseCursor)
-                {
-                    hideFakeMouseCursor();
-                }
-
-                // The cursor path reads DrawMouse under _loadingSettingsLock. A writer may
-                // finish replacing last_properties' matrix during that wait, so compare here,
-                // not when adopting the loaded properties above.
-                if (!Enumerable.SequenceEqual(last_properties.MachineMatrixString, _settings.Properties.MachineMatrixString))
-                {
-                    invalidateMachineMatrix(); // Forces read next time it's needed.
-                    shouldSendMachineMatrix = true;
-                }
-
-                var shouldReopenSockets = UpdateRuntimeKey();
-
-                if (shouldReopenSockets)
-                {
-                    SocketStuff.InvalidKeyFound = false;
-                    InitAndCleanup.ReopenSocketDueToReadError = true;
-                    Common.ReopenSockets(true);
-                }
-
-                if (shouldSendMachineMatrix)
-                {
-                    sendMachineMatrix();
-                    shouldSaveNewSettingsValues = true;
-                }
-
-                if (shouldSaveNewSettingsValues)
-                {
-                    saveSettings();
-                }
+                shouldSendMachineMatrix = true;
             }
+
+            // Same as CheckBoxDrawMouse_CheckedChanged
+            if (last.Advanced.DrawMouseCursor != cfg.Advanced.DrawMouseCursor && !cfg.Advanced.DrawMouseCursor)
+            {
+                CustomCursor.ShowFakeMouseCursor(int.MinValue, int.MinValue);
+            }
+
+            if (!Enumerable.SequenceEqual(last.MatrixSlots(), cfg.MatrixSlots()))
+            {
+                MachineStuff.MachineMatrix = null; // Forces read next time it's needed.
+                shouldSendMachineMatrix = true;
+            }
+
+            if (UpdateRuntimeKey())
+            {
+                SocketStuff.InvalidKeyFound = false;
+                InitAndCleanup.ReopenSocketDueToReadError = true;
+                Common.ReopenSockets(true);
+            }
+
+            if (shouldSendMachineMatrix)
+            {
+                MachineStuff.SendMachineMatrix();
+            }
+
+            LiteLog.Write(nameof(Settings), "Settings reloaded from " + _settingsFile);
+            return true;
         }
 
         public void SaveSettings()
         {
-            if (!Common.RunOnLogonDesktop)
+            // Only runtime state is persisted; the logon-desktop instance never writes (same rule as upstream).
+            if (Common.RunOnLogonDesktop)
             {
-                SaveSettingsToJson((MouseWithoutBordersProperties)_properties.Clone());
+                return;
             }
-        }
 
-        private void SaveSettingsToJson(MouseWithoutBordersProperties properties_to_save)
-        {
-            _settings.Properties = properties_to_save;
+            LiteState snapshot;
+            lock (_loadingSettingsLock)
+            {
+                snapshot = _state.Clone();
+            }
+
             _ = Task.Factory.StartNew(
                 () =>
             {
-                bool saved = false;
-
                 for (int i = 0; i < 5; ++i)
                 {
                     try
                     {
-                        lock (_loadingSettingsLock)
+                        lock (_saveLock)
                         {
-                            _settings.Save(_settingsUtils);
+                            snapshot.Save(_stateFile);
                         }
 
-                        saved = true;
+                        return;
                     }
-                    catch (IOException ex)
+                    catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
                     {
-                        EventLogger.LogEvent($"Failed to write settings: {ex.Message}", System.Diagnostics.EventLogEntryType.Error);
+                        LiteLog.Write(nameof(Settings), $"Failed to write state: {ex.Message}");
                     }
 
-                    if (saved)
-                    {
-                        break;
-                    }
-                    else
-                    {
-                        Thread.Sleep(500);
-                    }
+                    System.Threading.Thread.Sleep(500);
                 }
             },
                 System.Threading.CancellationToken.None,
                 TaskCreationOptions.None,
                 TaskScheduler.Default);
-        }
-
-        internal Settings(IPairingKeyCodec pairingKeyCodec)
-        {
-            ArgumentNullException.ThrowIfNull(pairingKeyCodec);
-            _pairingKeyCodec = pairingKeyCodec;
-            _settingsUtils = SettingsUtils.Default;
-
-            _watcher = SettingsHelper.GetFileWatcher("MouseWithoutBorders", "settings.json", () =>
-            {
-                try
-                {
-                    UpdateSettingsFromJson();
-                }
-                catch (Exception ex)
-                {
-                    EventLogger.LogEvent($"Failed to update settings: {ex.Message}", System.Diagnostics.EventLogEntryType.Error);
-                }
-            });
-
-            UpdateSettingsFromJson();
-        }
-
-        // Initialize the same settings state without starting a file watcher or network work.
-        internal Settings(SettingsUtils settingsUtils, MouseWithoutBordersSettings settings, IPairingKeyCodec pairingKeyCodec)
-        {
-            ArgumentNullException.ThrowIfNull(pairingKeyCodec);
-            _pairingKeyCodec = pairingKeyCodec;
-            _settingsUtils = settingsUtils;
-            _settings = settings;
-            _properties = settings.Properties;
         }
 
         internal string Username { get; set; }
@@ -254,7 +253,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return string.Join(",", _properties.MachineMatrixString);
+                    return string.Join(",", _config.MatrixSlots());
                 }
             }
 
@@ -265,14 +264,8 @@ namespace MouseWithoutBorders.Class
         {
             lock (_loadingSettingsLock)
             {
-                // Capture one properties instance and replace its list in one assignment.
-                // Reload adoption is intentionally not under this lock: MachineStuff takes
-                // McMatrixLock before this lock, so reversing that order could deadlock.
-                _properties.ReplaceMachineMatrixString(machineNames);
-                if (!PauseInstantSaving)
-                {
-                    SaveSettings();
-                }
+                // Runtime change (e.g. matrix received from a peer): in memory only.
+                _config.Machines = machineNames.Select(LiteConfig.NormalizeName).ToList();
             }
         }
 
@@ -282,7 +275,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.MachinePool.Value;
+                    return _state.MachinePool;
                 }
             }
 
@@ -290,9 +283,9 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    if (!value.Equals(_properties.MachinePool.Value, StringComparison.OrdinalIgnoreCase))
+                    if (!value.Equals(_state.MachinePool, StringComparison.OrdinalIgnoreCase))
                     {
-                        _properties.MachinePool.Value = value;
+                        _state.MachinePool = value;
                     }
                 }
             }
@@ -306,64 +299,44 @@ namespace MouseWithoutBorders.Class
         {
             get
             {
-                if (GPOWrapper.GetConfiguredMwbClipboardSharingEnabledValue() == GpoRuleConfigured.Disabled)
-                {
-                    return false;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.ShareClipboard;
+                    return _config.ShareClipboard;
                 }
             }
 
             set
             {
-                if (ShareClipboardIsGpoConfigured)
-                {
-                    return;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    _properties.ShareClipboard = value;
+                    _config.ShareClipboard = value;
                 }
             }
         }
 
-        [CmdConfigureIgnore]
-        [JsonIgnore]
-        internal bool ShareClipboardIsGpoConfigured => GPOWrapper.GetConfiguredMwbClipboardSharingEnabledValue() == GpoRuleConfigured.Disabled;
+        // MwbLite: there is no policy layer; kept (always false) for the upstream settings forms.
+        internal bool ShareClipboardIsGpoConfigured => false;
 
         internal bool TransferFile
         {
             get
             {
-                if (GPOWrapper.GetConfiguredMwbFileTransferEnabledValue() == GpoRuleConfigured.Disabled)
-                {
-                    return false;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.TransferFile;
+                    return _config.TransferFile;
                 }
             }
 
             set
             {
-                if (TransferFileIsGpoConfigured)
+                lock (_loadingSettingsLock)
                 {
-                    return;
+                    _config.TransferFile = value;
                 }
-
-                _properties.TransferFile = value;
             }
         }
 
-        [CmdConfigureIgnore]
-        [JsonIgnore]
-        internal bool TransferFileIsGpoConfigured => GPOWrapper.GetConfiguredMwbFileTransferEnabledValue() == GpoRuleConfigured.Disabled;
+        internal bool TransferFileIsGpoConfigured => false;
 
         internal bool MatrixOneRow
         {
@@ -371,7 +344,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.MatrixOneRow;
+                    return _config.Layout.OneRow;
                 }
             }
 
@@ -379,11 +352,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.MatrixOneRow = value;
-                    if (!PauseInstantSaving)
-                    {
-                        SaveSettings();
-                    }
+                    _config.Layout.OneRow = value;
                 }
             }
         }
@@ -394,7 +363,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.WrapMouse;
+                    return _config.Layout.WrapMouse;
                 }
             }
 
@@ -402,11 +371,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.WrapMouse = value;
-                    if (!PauseInstantSaving)
-                    {
-                        SaveSettings();
-                    }
+                    _config.Layout.WrapMouse = value;
                 }
             }
         }
@@ -417,7 +382,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.EasyMouse.Value;
+                    return (int)_config.Advanced.EasyMouse;
                 }
             }
 
@@ -425,12 +390,8 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.EasyMouse.Value = value;
-                    if (!PauseInstantSaving)
-                    {
-                        // Easy Mouse can be enabled or disabled through a shortcut, so a save is required.
-                        SaveSettings();
-                    }
+                    // Toggled by hotkey: kept until restart or "Reload config".
+                    _config.Advanced.EasyMouse = (EasyMouseOption)value;
                 }
             }
         }
@@ -441,7 +402,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.BlockMouseAtScreenCorners;
+                    return _config.Advanced.BlockMouseAtScreenCorners;
                 }
             }
 
@@ -449,7 +410,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.BlockMouseAtScreenCorners = value;
+                    _config.Advanced.BlockMouseAtScreenCorners = value;
                 }
             }
         }
@@ -460,7 +421,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.DisableEasyMouseWhenForegroundWindowIsFullscreen;
+                    return _config.Advanced.DisableEasyMouseWhenForegroundWindowIsFullscreen;
                 }
             }
 
@@ -468,7 +429,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.DisableEasyMouseWhenForegroundWindowIsFullscreen = value;
+                    _config.Advanced.DisableEasyMouseWhenForegroundWindowIsFullscreen = value;
                 }
             }
         }
@@ -479,7 +440,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.EasyMouseFullscreenSwitchBlockExcludedApps.Value;
+                    return new HashSet<string>(_config.Advanced.EasyMouseFullscreenExcludedApps, StringComparer.OrdinalIgnoreCase);
                 }
             }
 
@@ -487,7 +448,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.EasyMouseFullscreenSwitchBlockExcludedApps.Value = value;
+                    _config.Advanced.EasyMouseFullscreenExcludedApps = value?.ToList() ?? new List<string>();
                 }
             }
         }
@@ -527,25 +488,20 @@ namespace MouseWithoutBorders.Class
 
                 lock (_loadingSettingsLock)
                 {
-                    if (_pairingKeyCodec.IsEncrypted(_properties.SecurityKey.Value))
-                    {
-                        return PairingKeyCodec.IsEncryptedValue(_properties.SecurityKey.Value)
-                            ? MouseWithoutBordersIpc.PairingConfiguredIndicator
-                            : string.Empty;
-                    }
-
-                    return _properties.SecurityKey.Value;
+                    return _config.SecurityKey;
                 }
             }
         }
 
+        // MwbLite always uses the pass-through codec (see Setting.CreatePairingKeyCodec), so a stored key
+        // can only "mismatch" if someone pasted an upstream DPAPI-protected value into settings.json.
         internal bool IsPairingKeyModeMismatch
         {
             get
             {
                 lock (_pairingKeyLock)
                 {
-                    var storedKey = _properties.SecurityKey.Value;
+                    var storedKey = _config.SecurityKey;
                     return !string.IsNullOrEmpty(storedKey) &&
                         (_pairingKeyCodec is DpapiPairingKeyCodec) != PairingKeyCodec.IsEncryptedValue(storedKey);
                 }
@@ -558,14 +514,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_pairingKeyLock)
                 {
-                    if (!IsProtectedMode && string.IsNullOrEmpty(_properties.SecurityKey.Value))
-                    {
-                        string randomKey = Encryption.CreateDefaultKey();
-                        _properties.SecurityKey.Value = _pairingKeyCodec.Encrypt(randomKey);
-                    }
-
-                    // Only the settings JSON carries the encoded value; callers always receive plaintext.
-                    var key = _pairingKeyCodec.Decrypt(_properties.SecurityKey.Value);
+                    var key = _pairingKeyCodec.Decrypt(_config.SecurityKey);
                     if (PairingKeyCodec.IsEncryptedValue(key))
                     {
                         throw new CryptographicException("The saved pairing key cannot be used in the current mode.");
@@ -579,31 +528,11 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_pairingKeyLock)
                 {
-                    bool reuseStoredKey = false;
-                    var storedKey = _properties.SecurityKey.Value;
-                    if (!string.IsNullOrEmpty(storedKey))
+                    if (!string.Equals(_config.SecurityKey, value, StringComparison.Ordinal))
                     {
-                        try
-                        {
-                            reuseStoredKey = string.Equals(_pairingKeyCodec.Decrypt(storedKey), value, StringComparison.Ordinal);
-                        }
-                        catch (Exception ex) when (ex is CryptographicException or ArgumentException or FormatException)
-                        {
-                            EventLogger.LogEvent($"Failed to compare stored pairing key: {ex.GetType().Name}", System.Diagnostics.EventLogEntryType.Warning);
-                        }
-                    }
-
-                    if (!reuseStoredKey)
-                    {
-                        storedKey = _pairingKeyCodec.Encrypt(value);
-                    }
-
-                    // Reload adoption can replace the properties during either codec call.
-                    _properties.SecurityKey.Value = storedKey;
-
-                    if (!PauseInstantSaving)
-                    {
-                        SaveSettings();
+                        // Runtime change only (the upstream key-generation UI is not reachable in MwbLite).
+                        _config.SecurityKey = _pairingKeyCodec.Encrypt(value);
+                        LiteLog.Write(nameof(Settings), "Security key changed at runtime; settings.json is unchanged.");
                     }
                 }
             }
@@ -638,15 +567,11 @@ namespace MouseWithoutBorders.Class
         {
             get
             {
-                lock (_loadingSettingsLock)
-                {
-                    return int.MaxValue; // TODO(@yuyoyuppe): do we still need expiration mechanics now?
-                }
+                return int.MaxValue; // TODO(@yuyoyuppe): do we still need expiration mechanics now?
             }
         }
 
         // Note(@htcfreek): Settings UI CheckBox is disabled in frmMatrix.cs > FrmMatrix_Load()
-        // Note(@htcfreek): If this settings gets implemented in the future we need a Group Policy for it!
         internal bool DisableCAD
         {
             get
@@ -656,7 +581,6 @@ namespace MouseWithoutBorders.Class
         }
 
         // Note(@htcfreek): Settings UI CheckBox is disabled in frmMatrix.cs > FrmMatrix_Load()
-        // Note(@htcfreek): If this settings gets implemented in the future we need a Group Policy for it!
         internal bool HideLogonLogo
         {
             get
@@ -671,7 +595,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.HideMouseAtScreenEdge;
+                    return _config.Advanced.HideMouseAtScreenEdge;
                 }
             }
 
@@ -679,7 +603,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.HideMouseAtScreenEdge = value;
+                    _config.Advanced.HideMouseAtScreenEdge = value;
                 }
             }
         }
@@ -688,34 +612,22 @@ namespace MouseWithoutBorders.Class
         {
             get
             {
-                if (GPOWrapper.GetConfiguredMwbDisallowBlockingScreensaverValue() == GpoRuleConfigured.Enabled)
-                {
-                    return false;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.BlockScreenSaverOnOtherMachines;
+                    return _config.Advanced.BlockScreenSaverOnOtherMachines;
                 }
             }
 
             set
             {
-                if (BlockScreenSaverIsGpoConfigured)
-                {
-                    return;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    _properties.BlockScreenSaverOnOtherMachines = value;
+                    _config.Advanced.BlockScreenSaverOnOtherMachines = value;
                 }
             }
         }
 
-        [CmdConfigureIgnore]
-        [JsonIgnore]
-        internal bool BlockScreenSaverIsGpoConfigured => GPOWrapper.GetConfiguredMwbDisallowBlockingScreensaverValue() == GpoRuleConfigured.Enabled;
+        internal bool BlockScreenSaverIsGpoConfigured => false;
 
         internal bool MoveMouseRelatively
         {
@@ -723,7 +635,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.MoveMouseRelatively;
+                    return _config.Advanced.MoveMouseRelatively;
                 }
             }
 
@@ -731,7 +643,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.MoveMouseRelatively = value;
+                    _config.Advanced.MoveMouseRelatively = value;
                 }
             }
         }
@@ -750,7 +662,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return (uint)_properties.MachineID.Value;
+                    return (uint)_state.MachineId;
                 }
             }
 
@@ -758,7 +670,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.MachineID.Value = (int)value;
+                    _state.MachineId = (int)value;
                 }
             }
         }
@@ -769,7 +681,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.LastX.Value;
+                    return _state.LastX;
                 }
             }
 
@@ -778,7 +690,7 @@ namespace MouseWithoutBorders.Class
                 lock (_loadingSettingsLock)
                 {
                     Common.LastX = value;
-                    _properties.LastX.Value = value;
+                    _state.LastX = value;
                 }
             }
         }
@@ -789,7 +701,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.LastY.Value;
+                    return _state.LastY;
                 }
             }
 
@@ -798,7 +710,7 @@ namespace MouseWithoutBorders.Class
                 lock (_loadingSettingsLock)
                 {
                     Common.LastY = value;
-                    _properties.LastY.Value = value;
+                    _state.LastY = value;
                 }
             }
         }
@@ -809,7 +721,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.PackageID.Value;
+                    return _state.PackageId;
                 }
             }
 
@@ -817,31 +729,17 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.PackageID.Value = value;
+                    _state.PackageId = value;
                 }
             }
         }
 
+        // MwbLite: pairing is done through settings.json, so the upstream first-run setup wizard never runs.
         internal bool FirstRun
         {
-            get
-            {
-                lock (_loadingSettingsLock)
-                {
-                    return _properties.FirstRun;
-                }
-            }
-
+            get => false;
             set
             {
-                lock (_loadingSettingsLock)
-                {
-                    _properties.FirstRun = value;
-                    if (!PauseInstantSaving)
-                    {
-                        SaveSettings();
-                    }
-                }
             }
         }
 
@@ -851,7 +749,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.HotKeySwitchMachine.Value;
+                    return _config.SwitchMachineHotkeyCode();
                 }
             }
 
@@ -859,7 +757,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.HotKeySwitchMachine.Value = value;
+                    _config.Advanced.Hotkeys.SwitchMachine = value == (int)VK.F1 ? "F1" : value == '1' ? "1" : "disabled";
                 }
             }
         }
@@ -870,7 +768,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.Switch2AllPCShortcut;
+                    return _config.Hotkey(_config.Advanced.Hotkeys.SwitchToAllPcs);
                 }
             }
         }
@@ -881,7 +779,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.ToggleEasyMouseShortcut;
+                    return _config.Hotkey(_config.Advanced.Hotkeys.ToggleEasyMouse);
                 }
             }
 
@@ -889,7 +787,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.ToggleEasyMouseShortcut = value;
+                    _config.Advanced.Hotkeys.ToggleEasyMouse = value?.ToString() ?? string.Empty;
                 }
             }
         }
@@ -900,7 +798,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.LockMachineShortcut;
+                    return _config.Hotkey(_config.Advanced.Hotkeys.LockMachine);
                 }
             }
 
@@ -908,7 +806,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.LockMachineShortcut = value;
+                    _config.Advanced.Hotkeys.LockMachine = value?.ToString() ?? string.Empty;
                 }
             }
         }
@@ -919,7 +817,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.ReconnectShortcut;
+                    return _config.Hotkey(_config.Advanced.Hotkeys.Reconnect);
                 }
             }
 
@@ -927,7 +825,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.ReconnectShortcut = value;
+                    _config.Advanced.Hotkeys.Reconnect = value?.ToString() ?? string.Empty;
                 }
             }
         }
@@ -961,7 +859,16 @@ namespace MouseWithoutBorders.Class
 
         internal int DumpObjectsLevel => 6;
 
-        internal int TcpPort => _properties.TCPPort.Value;
+        internal int TcpPort
+        {
+            get
+            {
+                lock (_loadingSettingsLock)
+                {
+                    return _config.Advanced.TcpPort;
+                }
+            }
+        }
 
         internal bool DrawMouse
         {
@@ -969,7 +876,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.DrawMouseCursor;
+                    return _config.Advanced.DrawMouseCursor;
                 }
             }
 
@@ -977,145 +884,81 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.DrawMouseCursor = value;
+                    _config.Advanced.DrawMouseCursor = value;
                 }
             }
         }
 
-        [CmdConfigureIgnore]
-        internal bool DrawMouseEx
-        {
-            get
-            {
-                lock (_loadingSettingsLock)
-                {
-                    return _properties.DrawMouseEx;
-                }
-            }
-
-            set
-            {
-                lock (_loadingSettingsLock)
-                {
-                    _properties.DrawMouseEx = value;
-                }
-            }
-        }
+        // Upstream default (true); was not exposed in the PowerToys Settings UI either.
+        internal bool DrawMouseEx { get; set; } = true;
 
         internal bool ReverseLookup
         {
             get
             {
-                if (GPOWrapper.GetConfiguredMwbValidateRemoteIpValue() == GpoRuleConfigured.Enabled)
-                {
-                    return true;
-                }
-                else if (GPOWrapper.GetConfiguredMwbValidateRemoteIpValue() == GpoRuleConfigured.Disabled)
-                {
-                    return false;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.ValidateRemoteMachineIP;
+                    return _config.Advanced.ValidateRemoteIp;
                 }
             }
 
             set
             {
-                if (ReverseLookupIsGpoConfigured)
-                {
-                    return;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    _properties.ValidateRemoteMachineIP = value;
+                    _config.Advanced.ValidateRemoteIp = value;
                 }
             }
         }
 
-        [CmdConfigureIgnore]
-        [JsonIgnore]
-        internal bool ReverseLookupIsGpoConfigured => GPOWrapper.GetConfiguredMwbValidateRemoteIpValue() == GpoRuleConfigured.Enabled || GPOWrapper.GetConfiguredMwbValidateRemoteIpValue() == GpoRuleConfigured.Disabled;
+        internal bool ReverseLookupIsGpoConfigured => false;
 
         internal bool SameSubNetOnly
         {
             get
             {
-                if (GPOWrapper.GetConfiguredMwbSameSubnetOnlyValue() == GpoRuleConfigured.Enabled)
-                {
-                    return true;
-                }
-                else if (GPOWrapper.GetConfiguredMwbSameSubnetOnlyValue() == GpoRuleConfigured.Disabled)
-                {
-                    return false;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.SameSubnetOnly;
+                    return _config.Advanced.SameSubnetOnly;
                 }
             }
 
             set
             {
-                if (SameSubNetOnlyIsGpoConfigured)
-                {
-                    return;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    _properties.SameSubnetOnly = value;
+                    _config.Advanced.SameSubnetOnly = value;
                 }
             }
         }
 
-        [CmdConfigureIgnore]
-        [JsonIgnore]
-        internal bool SameSubNetOnlyIsGpoConfigured => GPOWrapper.GetConfiguredMwbSameSubnetOnlyValue() == GpoRuleConfigured.Enabled || GPOWrapper.GetConfiguredMwbSameSubnetOnlyValue() == GpoRuleConfigured.Disabled;
+        internal bool SameSubNetOnlyIsGpoConfigured => false;
 
         internal string Name2IP
         {
             get
             {
-                if (GPOWrapper.GetConfiguredMwbDisableUserDefinedIpMappingRulesValue() == GpoRuleConfigured.Enabled)
-                {
-                    return string.Empty;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.Name2IP.Value;
+                    return _config.Name2IpString();
                 }
             }
 
             set
             {
-                if (Name2IpIsGpoConfigured)
-                {
-                    return;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    _properties.Name2IP.Value = value;
+                    _config.Advanced.Name2Ip = (value ?? string.Empty).Split("\r\n", StringSplitOptions.RemoveEmptyEntries).ToList();
                 }
             }
         }
 
-        [CmdConfigureIgnore]
-        [JsonIgnore]
-        internal bool Name2IpIsGpoConfigured => GPOWrapper.GetConfiguredMwbDisableUserDefinedIpMappingRulesValue() == GpoRuleConfigured.Enabled;
+        internal bool Name2IpIsGpoConfigured => false;
 
-        [CmdConfigureIgnore]
-        [JsonIgnore]
-        internal string Name2IpPolicyList => GPOWrapper.GetConfiguredMwbPolicyDefinedIpMappingRules();
+        // MwbLite: policy-defined name/IP rules came from Group Policy; there are none.
+        internal string Name2IpPolicyList => string.Empty;
 
-        [CmdConfigureIgnore]
-        [JsonIgnore]
-        internal bool Name2IpPolicyListIsGpoConfigured => !string.IsNullOrWhiteSpace(Name2IpPolicyList);
+        internal bool Name2IpPolicyListIsGpoConfigured => false;
 
         internal bool FirstCtrlShiftS
         {
@@ -1123,7 +966,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.FirstCtrlShiftS;
+                    return _state.FirstCtrlShiftS;
                 }
             }
 
@@ -1131,7 +974,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.FirstCtrlShiftS = value;
+                    _state.FirstCtrlShiftS = value;
                 }
             }
         }
@@ -1140,32 +983,10 @@ namespace MouseWithoutBorders.Class
         // This value wasn't changeable from UI, anyway.
         internal bool StealFocusWhenSwitchingMachine => true;
 
-        private string deviceId;
+        // Upstream regenerated this per process (the stored value was always overwritten); same here.
+        private readonly string deviceId = Guid.NewGuid().ToString();
 
-        internal string DeviceId
-        {
-            get
-            {
-                string newGuid = Guid.NewGuid().ToString();
-
-                if (deviceId == null || deviceId.Length != newGuid.Length)
-                {
-                    string defaultId = newGuid;
-                    lock (_loadingSettingsLock)
-                    {
-                        _properties.DeviceID = defaultId;
-                        deviceId = _properties.DeviceID.Value;
-
-                        if (deviceId.Equals(defaultId, StringComparison.OrdinalIgnoreCase))
-                        {
-                            return _properties.DeviceID.Value;
-                        }
-                    }
-                }
-
-                return deviceId;
-            }
-        }
+        internal string DeviceId => deviceId;
 
         private int? machineId;
 
@@ -1175,12 +996,12 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    machineId ??= (machineId = _properties.MachineID.Value).Value;
+                    machineId ??= _state.MachineId;
 
                     if (machineId == 0)
                     {
                         var newMachineId = Encryption.Ran.Next();
-                        _properties.MachineID.Value = newMachineId;
+                        _state.MachineId = newMachineId;
                         machineId = newMachineId;
                         if (!PauseInstantSaving)
                         {
@@ -1196,7 +1017,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.MachineID.Value = value;
+                    _state.MachineId = value;
                     machineId = value;
                     if (!PauseInstantSaving)
                     {
@@ -1216,7 +1037,7 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.ShowClipboardAndNetworkStatusMessages;
+                    return _config.Advanced.ShowClipboardAndNetworkStatusMessages;
                 }
             }
 
@@ -1224,37 +1045,17 @@ namespace MouseWithoutBorders.Class
             {
                 lock (_loadingSettingsLock)
                 {
-                    _properties.ShowClipboardAndNetworkStatusMessages = value;
+                    _config.Advanced.ShowClipboardAndNetworkStatusMessages = value;
                 }
             }
         }
 
+        // MwbLite: the tray icon is the only UI, so it is always shown.
         internal bool ShowOriginalUI
         {
-            get
-            {
-                if (GPOWrapper.GetConfiguredMwbUseOriginalUserInterfaceValue() == GpoRuleConfigured.Disabled)
-                {
-                    return false;
-                }
-
-                lock (_loadingSettingsLock)
-                {
-                    return _properties.ShowOriginalUI;
-                }
-            }
-
+            get => true;
             set
             {
-                if (GPOWrapper.GetConfiguredMwbUseOriginalUserInterfaceValue() == GpoRuleConfigured.Disabled)
-                {
-                    return;
-                }
-
-                lock (_loadingSettingsLock)
-                {
-                    _properties.ShowOriginalUI = value;
-                }
             }
         }
 
@@ -1263,38 +1064,22 @@ namespace MouseWithoutBorders.Class
         {
             get
             {
-                if (GPOWrapper.GetConfiguredMwbAllowServiceModeValue() == GpoRuleConfigured.Disabled)
-                {
-                    return false;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    return _properties.UseService;
+                    return _config.UseService;
                 }
             }
 
             set
             {
-                if (AllowServiceModeIsGpoConfigured)
-                {
-                    return;
-                }
-
                 lock (_loadingSettingsLock)
                 {
-                    _properties.UseService = value;
-                    if (!PauseInstantSaving)
-                    {
-                        SaveSettings();
-                    }
+                    _config.UseService = value;
                 }
             }
         }
 
-        [CmdConfigureIgnore]
-        [JsonIgnore]
-        internal bool AllowServiceModeIsGpoConfigured => GPOWrapper.GetConfiguredMwbAllowServiceModeValue() == GpoRuleConfigured.Disabled;
+        internal bool AllowServiceModeIsGpoConfigured => false;
 
         // Note(@htcfreek): Settings UI CheckBox is disabled in frmMatrix.cs > FrmMatrix_Load()
         internal bool SendErrorLogV2
@@ -1310,14 +1095,12 @@ namespace MouseWithoutBorders.Class
     {
         internal static Settings Values = new Settings(CreatePairingKeyCodec());
 
+        // MwbLite: the key is stored as plain text in every mode. Upstream's DPAPI codec protected the
+        // SYSTEM instance's key inside a user-writable file; MwbLite instead keeps the SYSTEM instance's
+        // settings in %ProgramData%\MwbLite, which only SYSTEM and Administrators can read or write.
         private static IPairingKeyCodec CreatePairingKeyCodec()
         {
-            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
-            var ownerSid = Program.ResolveSettingsIpcUserSid(
-                identity.User,
-                System.Diagnostics.Process.GetCurrentProcess().SessionId,
-                Program.GetInteractiveSessionUserSid);
-            return DpapiPairingKeyCodec.CreateForCurrentIdentity(ownerSid);
+            return new PassthroughPairingKeyCodec();
         }
     }
 }

@@ -11,7 +11,6 @@ using System.Globalization;
 using System.IO;
 using System.Windows.Forms;
 
-using Microsoft.PowerToys.Telemetry;
 
 // <summary>
 //     Startup/main form + helper methods.
@@ -89,6 +88,29 @@ namespace MouseWithoutBorders
             {
                 Logger.Log(e);
             }
+
+            ApplyLiteTrayMenu();
+        }
+
+        // MwbLite: minimal tray menu: Open config file, Reload config, Exit (plus upstream's list of
+        // connected machines, appended by UpdateMenu). The other upstream items stay defined but hidden.
+        private void ApplyLiteTrayMenu()
+        {
+            foreach (ToolStripItem item in new ToolStripItem[]
+            {
+                toolStripSeparator2, menuAbout, menuHelp, menuGenDumpFile, toolStripSeparator1, menuGetScreenCapture,
+                menuSendScreenCapture, toolStripMenuItem1, menuWindowsPhone, menuReinstallKeyboardAndMouseHook,
+                menuMachineMatrix, toolStripMenuItem2, MenuAllPC,
+            })
+            {
+                item.Visible = false;
+            }
+
+            var openConfig = new ToolStripMenuItem("&Open config file", null, (s, e) => Lite.LiteTray.OpenConfigFile());
+            var reloadConfig = new ToolStripMenuItem("&Reload config", null, (s, e) => Lite.LiteTray.ReloadConfig());
+            MainMenu.Items.Insert(0, openConfig);
+            MainMenu.Items.Insert(1, reloadConfig);
+            MainMenu.Items.Insert(2, new ToolStripSeparator());
         }
 
         private void FrmScreen_FormClosing(object sender, FormClosingEventArgs e)
@@ -164,7 +186,6 @@ namespace MouseWithoutBorders
 
         private void MenuExit_Click(object sender, EventArgs e)
         {
-            PowerToysTelemetry.Log.WriteEvent(new MouseWithoutBorders.Telemetry.MouseWithoutBordersOldUIQuitEvent());
 
             Quit(true, false);
         }
@@ -962,7 +983,11 @@ namespace MouseWithoutBorders
 
             if (Program.ShowServiceModeErrorTooltip)
             {
-                Common.ShowToolTip("Couldn't start the service. Will continue as not a service. Service mode must be enabled in the Settings again.", 10000, forceEvenIfHidingOldUI: true);
+                Common.ShowToolTip("Couldn't start MwbLite.Service (run \"MwbLite.exe --install\"). Continuing without the service; lock screen / UAC prompts are not controlled.", 10000, forceEvenIfHidingOldUI: true);
+            }
+            else if (!Common.RunOnLogonDesktop && !Common.RunOnScrSaverDesktop)
+            {
+                Lite.LiteTray.ShowStartupNotices();
             }
         }
 

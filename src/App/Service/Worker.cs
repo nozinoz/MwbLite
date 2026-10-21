@@ -5,6 +5,7 @@
 using System;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Reflection;
 using System.ServiceProcess;
 using System.Threading;
@@ -20,12 +21,12 @@ namespace MouseWithoutBordersService
     {
         private readonly ILogger<Worker> _logger;
         private readonly Action<ILogger, string, Exception> _infoLogger;
-        private readonly string processName = "PowerToys.MouseWithoutBorders";
+        private readonly string processName = MouseWithoutBorders.Lite.LitePaths.AppName; // MwbLite: was "PowerToys.MouseWithoutBorders"
         private readonly IHostApplicationLifetime _lifetime;
 
         private string[] _cmdArgs;
         private int appSessionId = -1;
-        private string myBinary = Assembly.GetExecutingAssembly().Location;
+        private string myBinary = Environment.ProcessPath; // MwbLite: Assembly.Location is empty in a single-file exe
 
         public Worker(ILogger<Worker> logger, IHostEnvironment environment, IHostApplicationLifetime lifeTime)
         {
@@ -41,6 +42,7 @@ namespace MouseWithoutBordersService
         private void Log(string message)
         {
             _infoLogger(_logger, message, null);
+            MouseWithoutBorders.Lite.LiteLog.Write(nameof(Worker), message);
         }
 
         private void LogDebug(string message)

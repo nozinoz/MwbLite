@@ -10,7 +10,6 @@ using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
 
-using Microsoft.PowerToys.Telemetry;
 using MouseWithoutBorders.Class;
 
 // <summary>
@@ -849,35 +848,9 @@ internal static class MachineStuff
             Common.ShowToolTip(Application.ProductName + " cannot be used in a remote desktop or virtual machine session.", 5000);
         }
 
-#if NEW_SETTINGS_FORM
-        Common.ShowSetupForm();
-#else
-        if (Setting.Values.FirstRun && !Setting.Values.IsPairingKeyModeMismatch && !Common.AtLeastOneSocketConnected())
-        {
-            MachineStuff.ShowSetupForm();
-        }
-        else
-        {
-            PowerToysTelemetry.Log.WriteEvent(new MouseWithoutBorders.Telemetry.MouseWithoutBordersOldUIOpenedEvent());
-
-            if (Common.MatrixForm == null)
-            {
-                Common.MatrixForm = new FrmMatrix();
-                Common.MatrixForm.Show();
-
-                if (Common.MainForm != null)
-                {
-                    Common.MainForm.NotifyIcon.Visible = false;
-                    Common.MainForm.NotifyIcon.Visible = Setting.Values.ShowOriginalUI;
-                }
-            }
-            else
-            {
-                Common.MatrixForm.WindowState = FormWindowState.Normal;
-                Common.MatrixForm.Activate();
-            }
-        }
-#endif
+        // MwbLite: the classic settings form / setup wizard is replaced by settings.json; every path
+        // that used to open it (tray click, key problems) opens the config file instead.
+        Lite.LiteTray.OpenConfigFile();
     }
 
     private static string[] mcMatrix;
@@ -1033,7 +1006,6 @@ internal static class MachineStuff
     {
         if (multipleMode)
         {
-            PowerToysTelemetry.Log.WriteEvent(new MouseWithoutBorders.Telemetry.MouseWithoutBordersMultipleModeEvent());
             NewDesMachineID = Common.DesMachineID = ID.ALL;
         }
         else

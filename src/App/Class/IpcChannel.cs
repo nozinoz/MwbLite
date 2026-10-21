@@ -9,7 +9,6 @@ using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Microsoft.PowerToys.Settings.UI.Library.Utilities;
 using MouseWithoutBorders.Core;
 using StreamJsonRpc;
 
@@ -61,96 +60,7 @@ WellKnownSidType.AuthenticatedUserSid, null);
             return default(T);
         }
 
-        public static T StartVerifiedIpcServer(
-            string pipeName,
-            SecurityIdentifier allowedUser,
-            Func<NamedPipeServerStream, string> verifyClientConnection,
-            CancellationToken cancellationToken)
-        {
-            return StartVerifiedIpcServer(pipeName, allowedUser, verifyClientConnection, _ => new T(), null, cancellationToken);
-        }
-
-        public static T StartVerifiedIpcServer(
-            string pipeName,
-            SecurityIdentifier allowedUser,
-            Func<NamedPipeServerStream, string> verifyClientConnection,
-            Func<NamedPipeServerStream, T> targetFactory,
-            CancellationToken cancellationToken)
-        {
-            return StartVerifiedIpcServer(pipeName, allowedUser, verifyClientConnection, targetFactory, null, cancellationToken);
-        }
-
-        internal static T StartVerifiedIpcServer(
-            string pipeName,
-            SecurityIdentifier allowedUser,
-            Func<NamedPipeServerStream, string> verifyClientConnection,
-            Action<Exception> serverErrorObserver,
-            CancellationToken cancellationToken)
-        {
-            return StartVerifiedIpcServer(pipeName, allowedUser, verifyClientConnection, _ => new T(), serverErrorObserver, cancellationToken);
-        }
-
-        internal static T StartVerifiedIpcServer(
-            string pipeName,
-            SecurityIdentifier allowedUser,
-            Func<NamedPipeServerStream, string> verifyClientConnection,
-            Func<NamedPipeServerStream, T> targetFactory,
-            Action<Exception> serverErrorObserver,
-            CancellationToken cancellationToken)
-        {
-            ArgumentNullException.ThrowIfNull(verifyClientConnection);
-            ArgumentNullException.ThrowIfNull(targetFactory);
-
-            _ = Task.Run(
-                async () =>
-                {
-                    while (!cancellationToken.IsCancellationRequested)
-                    {
-                        try
-                        {
-                            using var serverChannel = RestrictedNamedPipeServer.Create(pipeName, allowedUser);
-                            await serverChannel.WaitForConnectionAsync(cancellationToken);
-
-                            var rejectionReason = verifyClientConnection(serverChannel);
-                            if (!string.IsNullOrEmpty(rejectionReason))
-                            {
-#if !MM_HELPER
-                                Logger.Log($"Rejected Settings IPC client: {rejectionReason}");
-#endif
-                                if (serverChannel.IsConnected)
-                                {
-                                    serverChannel.Disconnect();
-                                }
-
-                                await Task.Delay(250, cancellationToken);
-                                continue;
-                            }
-
-                            var taskRpc = JsonRpc.Attach(serverChannel, targetFactory(serverChannel));
-                            await taskRpc.Completion;
-                        }
-                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                        {
-                            break;
-                        }
-                        catch (Exception e)
-                        {
-                            serverErrorObserver?.Invoke(e);
-#if MM_HELPER
-                            _ = e;
-#else
-                            Logger.Log(e);
-#endif
-                            if (!cancellationToken.IsCancellationRequested)
-                            {
-                                await Task.Delay(250);
-                            }
-                        }
-                    }
-                },
-                cancellationToken);
-
-            return default(T);
-        }
+        // MwbLite: StartVerifiedIpcServer (PowerToys Settings IPC v2, RestrictedNamedPipeServer) removed;
+        // there is no Settings app to talk to. Only the main<->helper clipboard pipe remains.
     }
 }

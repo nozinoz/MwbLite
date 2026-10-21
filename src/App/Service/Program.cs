@@ -2,11 +2,15 @@
 // The Microsoft Corporation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-using System.Diagnostics;
+// MwbLite: compiled into MwbLite.exe and entered through "MwbLite.exe --service" (was the separate
+// PowerToys.MouseWithoutBordersService.exe). Removed the Group Policy checks; service name is
+// "MwbLite.Service"; logging goes to the MwbLite log file instead of the Windows Event Log.
+using System;
+using System.Linq;
 
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace MouseWithoutBordersService
 {
@@ -25,26 +29,19 @@ namespace MouseWithoutBordersService
 
     internal sealed class Program
     {
-        [STAThread]
-        private static void Main()
+        /// <param name="args">Full command line; args[1] is "--service".</param>
+        internal static void RunService(string[] args)
         {
-            if (PowerToys.GPOWrapper.GPOWrapper.GetConfiguredMouseWithoutBordersEnabledValue() == PowerToys.GPOWrapper.GpoRuleConfigured.Disabled
-                || PowerToys.GPOWrapper.GPOWrapper.GetConfiguredMwbAllowServiceModeValue() == PowerToys.GPOWrapper.GpoRuleConfigured.Disabled )
-            {
-                // TODO: Add logging.
-                // Logger.LogWarning("Tried to start with a GPO policy setting the utility to always be disabled. Please contact your systems administrator.");
-                return;
-            }
-
-            string[] args = Environment.GetCommandLineArgs();
-            CmdArgs.Value = args;
-            var builder = Host.CreateDefaultBuilder(args);
+            // Worker reads args[1] as the user's local app data path (unused by MwbLite); drop "--service".
+            CmdArgs.Value = args.Take(1).Concat(args.Skip(2)).ToArray();
+            var builder = Host.CreateDefaultBuilder();
 
             var host = builder
             .UseWindowsService(options =>
             {
-                options.ServiceName = "PowerToys.MWB.Service";
+                options.ServiceName = MouseWithoutBorders.Lite.LitePaths.ServiceName;
             })
+            .ConfigureLogging(logging => logging.ClearProviders())
             .ConfigureServices(services =>
             {
                 services.AddHostedService<Worker>();

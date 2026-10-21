@@ -10,7 +10,6 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
-using Microsoft.PowerToys.Telemetry;
 
 // <summary>
 //     Matrix/Settings form.
@@ -1188,7 +1187,6 @@ namespace MouseWithoutBorders
 
             if (MessageBox.Show(message, Application.ProductName, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == System.Windows.Forms.DialogResult.Yes)
             {
-                PowerToysTelemetry.Log.WriteEvent(new MouseWithoutBorders.Telemetry.MouseWithoutBordersOldUIReconfigureEvent());
                 ButtonCancel_Click(this, new EventArgs());
                 Setting.Values.FirstRun = true;
                 Setting.Values.EasyMouse = (int)EasyMouseOption.Enable;

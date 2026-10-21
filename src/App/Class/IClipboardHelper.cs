@@ -227,27 +227,11 @@ namespace MouseWithoutBorders
 
     internal static class EventLogger
     {
-#if MM_HELPER
-        private const string EventSourceName = "MouseWithoutBordersHelper";
-#else
-        private const string EventSourceName = "MouseWithoutBorders";
-#endif
-
+        // MwbLite: was the Windows Event Log (sources "MouseWithoutBorders" / "MouseWithoutBordersHelper",
+        // which needed admin rights to register); now the MwbLite log file.
         internal static void LogEvent(string message, EventLogEntryType logType = EventLogEntryType.Information)
         {
-            try
-            {
-                if (!EventLog.SourceExists(EventSourceName))
-                {
-                    EventLog.CreateEventSource(EventSourceName, "Application");
-                }
-
-                EventLog.WriteEntry(EventSourceName, message, logType);
-            }
-            catch (Exception e)
-            {
-                Debug.WriteLine(message + ": " + e.Message);
-            }
+            Lite.LiteLog.Write(nameof(EventLogger), logType + ": " + message);
         }
     }
 #if MM_HELPER

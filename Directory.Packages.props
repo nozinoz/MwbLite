@@ -1,0 +1,20 @@
+<Project>
+  <!-- Versions copied from PowerToys' Directory.Packages.props at the imported commit (see UPSTREAM.md). -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+    <DotNetRuntimePackageVersion>10.0.11</DotNetRuntimePackageVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="MessagePack" Version="3.1.9" /> <!-- upstream pins 3.1.7; 3.1.9 fixes GHSA-qhrr-8q5h-9q3h -->
+    <PackageVersion Include="Microsoft.Bcl.AsyncInterfaces" Version="$(DotNetRuntimePackageVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="$(DotNetRuntimePackageVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="$(DotNetRuntimePackageVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="$(DotNetRuntimePackageVersion)" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="$(DotNetRuntimePackageVersion)" />
+    <PackageVersion Include="MSTest" Version="3.8.3" />
+    <PackageVersion Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageVersion Include="StreamJsonRpc" Version="2.21.69" />
+    <PackageVersion Include="System.ServiceProcess.ServiceController" Version="$(DotNetRuntimePackageVersion)" />
+  </ItemGroup>
+</Project>

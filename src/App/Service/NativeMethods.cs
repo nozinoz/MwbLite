@@ -2,11 +2,14 @@
 // The Microsoft Corporation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
+// MwbLite: explicit usings (the upstream service project used ImplicitUsings).
+using System;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.ServiceProcess;
+using System.Threading;
 
 namespace MouseWithoutBordersService
 {

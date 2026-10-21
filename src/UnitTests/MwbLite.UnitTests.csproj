@@ -1,20 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Look at Directory.Build.props in root for common stuff as well -->
-  <Import Project="$(RepoRoot)src\Common.Dotnet.CsWinRT.props" />
-  <Import Project="$(RepoRoot)src\Common.SelfContained.props" />
-
   <PropertyGroup>
+    <!-- Kept so upstream's InternalsVisibleTo("MouseWithoutBorders.UnitTests") applies unchanged. -->
+    <AssemblyName>MouseWithoutBorders.UnitTests</AssemblyName>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <OutputType>Exe</OutputType>
+    <EnableMSTestRunner>true</EnableMSTestRunner>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
     <None Remove="Core\Logger.PrivateDump.expected.txt" />
     <None Remove="Core\Logger.PrivateDump.original.txt" />
-  </ItemGroup>
-
-  <ItemGroup>
     <EmbeddedResource Include="Core\Logger.PrivateDump.expected.txt" />
     <EmbeddedResource Include="Core\Logger.PrivateDump.original.txt" />
   </ItemGroup>
@@ -24,7 +22,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\App\MouseWithoutBorders.csproj" />
+    <ProjectReference Include="..\App\MwbLite.csproj" />
   </ItemGroup>
-
 </Project>

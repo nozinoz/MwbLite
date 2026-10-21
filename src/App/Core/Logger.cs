@@ -65,7 +65,8 @@ internal static class Logger
     {
         log = DateTime.Now.ToString("MM/dd HH:mm:ss.fff", CultureInfo.InvariantCulture) + $"({Thread.CurrentThread.ManagedThreadId})" + log;
 
-        ManagedCommon.Logger.LogInfo(log, memberName, sourceFilePath, sourceLineNumber);
+        // MwbLite: was ManagedCommon.Logger.LogInfo (PowerToys logger); now a local size-capped file.
+        Lite.LiteLog.Write(memberName, log);
         lock (AllLogsLock)
         {
             if (clearLog)

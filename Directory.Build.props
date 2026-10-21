@@ -1,0 +1,24 @@
+<Project>
+  <!-- Minimal replacement for PowerToys' root build infrastructure (no C++, no vcpkg, no Azure feed). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <Platforms>x64</Platforms>
+    <Platform>x64</Platform>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Upstream code style analyzers (StyleCop, CA) are not part of this build. -->
+    <NoWarn>$(NoWarn);CA1416;CS0618;SYSLIB0003;SYSLIB0011;SYSLIB0014;WFO1000;WFAC010</NoWarn>
+    <Product>MwbLite</Product>
+    <Company>MwbLite</Company>
+    <Copyright>Copyright (c) Microsoft Corporation. MwbLite is derived from Mouse Without Borders in PowerToys (MIT).</Copyright>
+    <Version>0.1.0</Version>
+    <Deterministic>true</Deterministic>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>

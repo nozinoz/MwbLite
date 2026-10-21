@@ -9,38 +9,24 @@
 //     2008 created by Truong Do (ductdo).
 //     2009-... modified by Truong Do (TruongDo).
 //     2023- Included in PowerToys.
+//     MwbLite: removed the PowerToys logger/ETW trace, Group Policy checks, the PowerToys runner exit
+//              watcher, the Command Palette event listener, the PowerToys Settings IPC server and
+//              telemetry. Added "--" commands (service host, install, apply-config...), see LiteCommands.
 // </history>
 using System;
-using System.Collections.Generic;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Drawing.Printing;
 using System.Globalization;
 using System.IO;
-using System.IO.Pipes;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Security;
-using System.Security.Authentication.ExtendedProtection;
-using System.Security.Cryptography;
 using System.Security.Principal;
 using System.ServiceProcess;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Xml.Linq;
 
-using ManagedCommon;
-using Microsoft.PowerToys.Settings.UI.Library.Utilities;
-using Microsoft.PowerToys.Telemetry;
-using Microsoft.Win32.SafeHandles;
 using MouseWithoutBorders.Core;
-using Newtonsoft.Json;
-using StreamJsonRpc;
+using MouseWithoutBorders.Lite;
 
 using Logger = MouseWithoutBorders.Core.Logger;
-using SettingsHelper = Microsoft.PowerToys.Settings.UI.Library.Utilities.Helper;
 using Thread = MouseWithoutBorders.Core.Thread;
 
 [module: SuppressMessage("Microsoft.MSInternal", "CA904:DeclareTypesInMicrosoftOrSystemNamespace", Scope = "namespace", Target = "MouseWithoutBorders", Justification = "Dotnet port with style preservation")]
@@ -52,7 +38,7 @@ namespace MouseWithoutBorders.Class
 {
     internal static class Program
     {
-        private static readonly string ServiceName = "PowerToys.MWB.Service";
+        private static readonly string ServiceName = LitePaths.ServiceName;
 
         private static readonly string ServiceModeArg = "UseService";
 
@@ -61,30 +47,36 @@ namespace MouseWithoutBorders.Class
         [STAThread]
         private static void Main()
         {
-            ManagedCommon.Logger.InitializeLogger("\\MouseWithoutBorders\\Logs");
-            Logger.Log(Application.ProductName + " Started!");
+            string[] args = Environment.GetCommandLineArgs();
 
-            ETWTrace etwTrace = new ETWTrace();
-
-            if (PowerToys.GPOWrapper.GPOWrapper.GetConfiguredMouseWithoutBordersEnabledValue() == PowerToys.GPOWrapper.GpoRuleConfigured.Disabled)
+            // MwbLite commands: --service, --install, --uninstall, --apply-config, --open-config, --help.
+            if (args.Length > 1 && args[1] != null && args[1].StartsWith("--", StringComparison.Ordinal))
             {
-                Logger.Log("Tried to start with a GPO policy setting the utility to always be disabled. Please contact your systems administrator.");
+                Environment.ExitCode = LiteCommands.Run(args);
                 return;
             }
-
-            Thread.CurrentThread.Name = Application.ProductName + " main thread";
-            Common.BinaryName = Path.GetFileNameWithoutExtension(Application.ExecutablePath);
 
             WindowsIdentity currentUser = WindowsIdentity.GetCurrent();
             SecurityIdentifier currentUserSID = currentUser.User;
             SecurityIdentifier localSystemSID = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
 
             bool runningAsSystem = currentUserSID.Equals(localSystemSID);
+
+            if (runningAsSystem)
+            {
+                // SYSTEM instances only use %ProgramData%\MwbLite (SYSTEM/Administrators only).
+                LitePaths.EnsureProtectedDirectory(LitePaths.ServiceDir);
+            }
+
+            LiteLog.Initialize(LitePaths.LogDir, runningAsSystem ? "mwblite-system" : "mwblite");
+            Logger.Log(Application.ProductName + " Started!");
+
+            Thread.CurrentThread.Name = Application.ProductName + " main thread";
+            Common.BinaryName = Path.GetFileNameWithoutExtension(Application.ExecutablePath);
+
             Common.RunWithNoAdminRight = !runningAsSystem;
             try
             {
-                string[] args = Environment.GetCommandLineArgs();
-
                 string firstArg = string.Empty;
                 if (args.Length > 1 && args[1] != null)
                 {
@@ -96,17 +88,12 @@ namespace MouseWithoutBorders.Class
 
                 Logger.Log(Environment.CommandLine);
 
-                bool serviceMode = firstArg == ServiceModeArg;
+                // Upstream got "UseService" from the PowerToys runner; MwbLite reads it from settings.json.
+                bool serviceMode = firstArg == ServiceModeArg || (firstArg.Length == 0 && Setting.Values.UseService);
 
-                if (PowerToys.GPOWrapper.GPOWrapper.GetConfiguredMwbAllowServiceModeValue() == PowerToys.GPOWrapper.GpoRuleConfigured.Disabled)
+                if (!runningAsSystem)
                 {
-                    if (runningAsSystem)
-                    {
-                        Logger.Log("Can't run as a service. It's not allowed according to GPO policy. Please contact your systems administrator.");
-                        return;
-                    }
-
-                    serviceMode = false;
+                    LiteStartup.Sync(Setting.Values.StartWithWindows, Application.ExecutablePath);
                 }
 
                 // If we're started from the .dll module or from the service process, we should
@@ -117,6 +104,7 @@ namespace MouseWithoutBorders.Class
                     {
                         var sc = new ServiceController(ServiceName);
                         sc.Start();
+                        Logger.Log("Started " + ServiceName + "; exiting the user instance.");
                         return;
                     }
                     catch (Exception ex)
@@ -128,16 +116,6 @@ namespace MouseWithoutBorders.Class
                         Setting.Values.UseService = false;
                     }
                 }
-
-                if (serviceMode || runningAsSystem)
-                {
-                    if (args.Length > 2)
-                    {
-                        SettingsHelper.UserLocalAppDataPath = args[2].Trim();
-                    }
-                }
-
-                ShutdownWithPowerToys.WaitForPowerToysRunner(etwTrace);
 
                 if (firstArg != string.Empty)
                 {
@@ -177,8 +155,6 @@ namespace MouseWithoutBorders.Class
                         return;
                     }
                 }
-
-                PowerToysTelemetry.Log.WriteEvent(new MouseWithoutBorders.Telemetry.MouseWithoutBordersStartedEvent());
 
                 try
                 {
@@ -230,19 +206,17 @@ namespace MouseWithoutBorders.Class
                 Thread.UpdateThreads(mainUIThread);
 
                 StartInputCallbackThread();
-                if (!Common.RunOnLogonDesktop)
-                {
-                    CommandEventHandler.StartListening();
-                }
 
                 Application.EnableVisualStyles();
                 _ = Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
                 Application.SetCompatibleTextRenderingDefault(false);
 
                 InitAndCleanup.Init();
-                if (!Common.RunOnLogonDesktop)
+
+                if (runningAsSystem)
                 {
-                    StartSettingSyncThread();
+                    // settings.json here only changes through the elevated --apply-config command.
+                    LiteTray.WatchServiceSettings();
                 }
 
                 Core.Helper.WndProcCounter++;
@@ -250,359 +224,10 @@ namespace MouseWithoutBorders.Class
                 var formScreen = new FrmScreen();
 
                 Application.Run(formScreen);
-
-                etwTrace?.Dispose();
             }
             catch (Exception e)
             {
                 Logger.Log(e);
-            }
-        }
-
-        private interface ISettingsSyncHelper
-        {
-            [JsonObject(MemberSerialization.OptIn)]
-            public struct MachineSocketState
-            {
-                // Disable false-positive warning due to IPC
-#pragma warning disable CS0649
-                [JsonProperty]
-                public string Name;
-
-                [JsonProperty]
-                public SocketStatus Status;
-#pragma warning restore CS0649
-            }
-
-            void Shutdown();
-
-            void Reconnect();
-
-            Task<string> GenerateNewKey();
-
-            Task<string> GetCurrentPairingKey();
-
-            Task ConnectToMachine(string machineName, string securityKey);
-
-            Task<MachineSocketState[]> RequestMachineSocketStateAsync();
-        }
-
-        private sealed class SettingsSyncHelper : ISettingsSyncHelper
-        {
-            private readonly bool _canManageServicePairing;
-
-            public SettingsSyncHelper()
-                : this(false)
-            {
-            }
-
-            internal SettingsSyncHelper(bool canManageServicePairing)
-            {
-                _canManageServicePairing = canManageServicePairing;
-            }
-
-            public Task<ISettingsSyncHelper.MachineSocketState[]> RequestMachineSocketStateAsync()
-            {
-                var machineStates = new Dictionary<string, SocketStatus>();
-                if (Common.Sk == null || Common.Sk.TcpSockets == null)
-                {
-                    return Task.FromResult(Array.Empty<ISettingsSyncHelper.MachineSocketState>());
-                }
-
-                foreach (var client in Common.Sk.TcpSockets
-                    .Where(t => t != null && t.IsClient && !string.IsNullOrEmpty(t.MachineName)))
-                {
-                    var exists = machineStates.TryGetValue(client.MachineName, out var existingStatus);
-                    if (!exists || existingStatus == SocketStatus.NA)
-                    {
-                        machineStates[client.MachineName] = client.Status;
-                    }
-                }
-
-                return Task.FromResult(machineStates.Select((state) => new ISettingsSyncHelper.MachineSocketState { Name = state.Key, Status = state.Value }).ToArray());
-            }
-
-            public Task<string> GetCurrentPairingKey()
-            {
-                EnsurePairingOperationAuthorized(Settings.IsProtectedMode, _canManageServicePairing);
-                var key = Encryption.MyKey;
-                if (string.IsNullOrWhiteSpace(key))
-                {
-                    throw new CryptographicException("Pairing setup is required.");
-                }
-
-                return Task.FromResult(key);
-            }
-
-            public Task ConnectToMachine(string pcName, string securityKey)
-            {
-                EnsurePairingOperationAuthorized(Settings.IsProtectedMode, _canManageServicePairing);
-                ArgumentException.ThrowIfNullOrWhiteSpace(pcName);
-                Setting.Values.PauseInstantSaving = true;
-                try
-                {
-                    Setting.Values.MyKey = securityKey;
-                    MachineStuff.ClearComputerMatrix();
-                    Encryption.MyKey = securityKey;
-                    Encryption.MagicNumber = Encryption.Get24BitHash(Encryption.MyKey);
-                    MachineStuff.MachineMatrix = new string[MachineStuff.MAX_MACHINE] { pcName.Trim().ToUpper(CultureInfo.CurrentCulture), Common.MachineName.Trim(), string.Empty, string.Empty };
-
-                    string[] machines = MachineStuff.MachineMatrix;
-                    MachineStuff.MachinePool.Initialize(machines);
-                    MachineStuff.UpdateMachinePoolStringSetting();
-
-                    SocketStuff.InvalidKeyFound = false;
-                    InitAndCleanup.ReopenSocketDueToReadError = true;
-                    Common.ReopenSockets(true);
-                    MachineStuff.SendMachineMatrix();
-                }
-                finally
-                {
-                    Setting.Values.PauseInstantSaving = false;
-                }
-
-                Setting.Values.SaveSettings();
-                return Task.CompletedTask;
-            }
-
-            public Task<string> GenerateNewKey()
-            {
-                EnsurePairingOperationAuthorized(Settings.IsProtectedMode, _canManageServicePairing);
-                Setting.Values.PauseInstantSaving = true;
-                string key;
-                try
-                {
-                    key = Encryption.CreateRandomKey();
-                    Setting.Values.MyKey = key;
-                    Setting.Values.EasyMouse = (int)EasyMouseOption.Enable;
-                    MachineStuff.ClearComputerMatrix();
-                    Encryption.MyKey = key;
-                    Encryption.GeneratedKey = true;
-                }
-                finally
-                {
-                    Setting.Values.PauseInstantSaving = false;
-                }
-
-                Setting.Values.SaveSettings();
-
-                Reconnect();
-
-                return Task.FromResult(key);
-            }
-
-            public void Reconnect()
-            {
-                SocketStuff.InvalidKeyFound = false;
-                InitAndCleanup.ReopenSocketDueToReadError = true;
-                Common.ReopenSockets(true);
-
-                for (int i = 0; i < 10; i++)
-                {
-                    if (Common.AtLeastOneSocketConnected())
-                    {
-                        Common.MMSleep(0.5);
-                        break;
-                    }
-
-                    Common.MMSleep(0.2);
-                }
-
-                MachineStuff.SendMachineMatrix();
-            }
-
-            public void Shutdown()
-            {
-                Process[] ps = Process.GetProcessesByName("PowerToys.MouseWithoutBorders");
-                Process me = Process.GetCurrentProcess();
-
-                foreach (Process p in ps)
-                {
-                    if (p.Id != me.Id)
-                    {
-                        p.Kill();
-                    }
-                }
-
-                Common.MainForm.Quit(true, false);
-            }
-        }
-
-        internal static void StartSettingSyncThread()
-        {
-            using var currentIdentity = WindowsIdentity.GetCurrent();
-            var processUserSid = currentIdentity.User;
-            if (processUserSid == null)
-            {
-                Logger.Log("Settings IPC v2 cannot determine the process user SID.");
-                return;
-            }
-
-            var sessionId = Process.GetCurrentProcess().SessionId;
-            SecurityIdentifier currentUserSid;
-            try
-            {
-                currentUserSid = ResolveSettingsIpcUserSid(processUserSid, sessionId, GetInteractiveSessionUserSid);
-            }
-            catch (Exception e)
-            {
-                Logger.Log($"Settings IPC v2 cannot determine the interactive user SID: {e}");
-                return;
-            }
-
-            try
-            {
-                GrantSettingsIpcProcessQueryAccessIfNeeded(
-                    processUserSid,
-                    currentUserSid,
-                    MouseWithoutBordersIpc.GrantCurrentProcessQueryAccess);
-            }
-            catch (Exception e)
-            {
-                Logger.Log($"Settings IPC v2 cannot grant process query access to the interactive user: {e}");
-                return;
-            }
-
-            IpcChannel<SettingsSyncHelper>.StartVerifiedIpcServer(
-                MouseWithoutBordersIpc.GetSettingsSyncPipeName(sessionId),
-                currentUserSid,
-                stream => NamedPipePeerVerification.TryVerifyClient(
-                    stream,
-                    MouseWithoutBordersIpc.SettingsExecutableFileName,
-                    currentUserSid.Value,
-                    sessionId,
-                    out var rejectionReason)
-                    ? string.Empty
-                    : rejectionReason,
-                stream => new SettingsSyncHelper(CanVerifiedClientManageServicePairing(stream, CanProcessManageServicePairing)),
-                CancellationToken.None);
-        }
-
-        internal static bool CanVerifiedClientManageServicePairing(NamedPipeServerStream stream, Func<uint, bool> inspectProcess)
-        {
-            if (!NamedPipePeerVerification.TryGetClientProcessId(stream, out var processId))
-            {
-                return false;
-            }
-
-            try
-            {
-                return inspectProcess(processId);
-            }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception or UnauthorizedAccessException or SecurityException)
-            {
-                Logger.Log($"Cannot inspect settings IPC caller token: {ex.Message}");
-                return false;
-            }
-        }
-
-        internal static void EnsurePairingOperationAuthorized(
-            bool protectedMode,
-            bool canManageServicePairing)
-        {
-            if (protectedMode && !canManageServicePairing)
-            {
-                throw new UnauthorizedAccessException("Administrator access is required to manage service pairing.");
-            }
-        }
-
-        private static bool CanProcessManageServicePairing(uint processId)
-        {
-            using var token = OpenProcessTokenForMembership(processId);
-            using var identity = new WindowsIdentity(token.DangerousGetHandle());
-            if (!PairingClientNativeMethods.GetTokenInformation(token, PairingClientNativeMethods.TokenElevation, out var elevation, Marshal.SizeOf<uint>(), out _))
-            {
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-            }
-
-            return elevation != 0 && new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
-        }
-
-        internal static SafeAccessTokenHandle OpenProcessTokenForMembership(uint processId)
-        {
-            using var process = PairingClientNativeMethods.OpenProcess(PairingClientNativeMethods.ProcessQueryLimitedInformation, false, processId);
-            if (process.IsInvalid)
-            {
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-            }
-
-            // WindowsPrincipal duplicates a primary token before checking membership.
-            if (!PairingClientNativeMethods.OpenProcessToken(process, PairingClientNativeMethods.TokenQuery | PairingClientNativeMethods.TokenDuplicate, out var token))
-            {
-                var error = Marshal.GetLastWin32Error();
-                token.Dispose();
-                throw new Win32Exception(error);
-            }
-
-            return token;
-        }
-
-        private static class PairingClientNativeMethods
-        {
-            internal const uint ProcessQueryLimitedInformation = 0x1000;
-            internal const uint TokenQuery = 0x0008;
-            internal const uint TokenDuplicate = 0x0002;
-            internal const int TokenElevation = 20;
-
-            [DllImport("kernel32.dll", SetLastError = true)]
-            internal static extern SafeProcessHandle OpenProcess(uint processAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
-
-            [DllImport("advapi32.dll", SetLastError = true)]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            internal static extern bool OpenProcessToken(SafeProcessHandle processHandle, uint desiredAccess, out SafeAccessTokenHandle tokenHandle);
-
-            [DllImport("advapi32.dll", SetLastError = true)]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            internal static extern bool GetTokenInformation(SafeAccessTokenHandle tokenHandle, int tokenInformationClass, out uint tokenInformation, int tokenInformationLength, out int returnLength);
-        }
-
-        internal static SecurityIdentifier ResolveSettingsIpcUserSid(
-            SecurityIdentifier processUserSid,
-            int sessionId,
-            Func<int, SecurityIdentifier> interactiveUserSidResolver)
-        {
-            ArgumentNullException.ThrowIfNull(processUserSid);
-            ArgumentNullException.ThrowIfNull(interactiveUserSidResolver);
-
-            return processUserSid.IsWellKnown(WellKnownSidType.LocalSystemSid)
-                ? interactiveUserSidResolver(sessionId) ?? throw new InvalidOperationException("The interactive session has no user SID.")
-                : processUserSid;
-        }
-
-        internal static void GrantSettingsIpcProcessQueryAccessIfNeeded(
-            SecurityIdentifier processUserSid,
-            SecurityIdentifier interactiveUserSid,
-            Action<SecurityIdentifier> grantAccess)
-        {
-            ArgumentNullException.ThrowIfNull(processUserSid);
-            ArgumentNullException.ThrowIfNull(interactiveUserSid);
-            ArgumentNullException.ThrowIfNull(grantAccess);
-
-            if (processUserSid.IsWellKnown(WellKnownSidType.LocalSystemSid))
-            {
-                grantAccess(interactiveUserSid);
-            }
-        }
-
-        internal static SecurityIdentifier GetInteractiveSessionUserSid(int sessionId)
-        {
-            IntPtr userToken = IntPtr.Zero;
-            try
-            {
-                if (NativeMethods.WTSQueryUserToken(unchecked((uint)sessionId), ref userToken) == 0)
-                {
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-                }
-
-                using var interactiveIdentity = new WindowsIdentity(userToken);
-                return interactiveIdentity.User ?? throw new InvalidOperationException("The interactive session token has no user SID.");
-            }
-            finally
-            {
-                if (userToken != IntPtr.Zero)
-                {
-                    _ = NativeMethods.CloseHandle(userToken);
-                }
             }
         }
 

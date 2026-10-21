@@ -2,6 +2,7 @@
 /upstream/
 # portable SDK, build outputs
 /.dotnet/
+/.nuget/
 /dist/
 bin/
 obj/
