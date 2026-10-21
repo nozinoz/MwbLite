@@ -16,7 +16,7 @@
     <Product>MwbLite</Product>
     <Company>MwbLite</Company>
     <Copyright>Copyright (c) Microsoft Corporation. MwbLite is derived from Mouse Without Borders in PowerToys (MIT).</Copyright>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Deterministic>true</Deterministic>
     <!-- Reproducible across checkout locations (MWB logs [CallerFilePath], which would embed local paths). -->
     <PathMap>$(MSBuildThisFileDirectory)=/mwblite/</PathMap>

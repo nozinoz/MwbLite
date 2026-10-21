@@ -43,7 +43,7 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 2.9 | If a Windows Firewall prompt appeared on either machine, allow **Private** networks. (With Setup, the rules are added automatically.) | — | |
 | 2.10 | **Wrong key:** in Settings on B, change one character of the key and save. | A and B stop working together (B can't be reached from A). The logs show connection or handshake errors. | |
 | 2.11 | Pair again with a code (2.2–2.5). Also try typing a 10-character key in Settings and saving. | They reconnect. The short key is refused with a red message. | |
-| 2.12 | **Arrange:** on A, swap the order under Machines and layout (e.g. `B, A`) and save. Then exit and restart MwbLite on B. | B's Settings shows the new order, both before and after the restart. | |
+| 2.12 | **Arrange:** on A, drag B's tile onto A's tile under Machines and layout (order becomes `B, A`) and press Save & apply. Then exit and restart MwbLite on B. | B's Settings shows the new order, both before and after the restart. | |
 ## 3. Cursor crossing the screen edge
 
 | # | Step | Expected | Result |
@@ -53,6 +53,8 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 3.3 | Press **Ctrl+Alt+F2**, then **Ctrl+Alt+F1** (positions in `machines`). | Control jumps to the 2nd machine, then back to the 1st. | |
 | 3.4 | Press **Win+Ctrl+Alt+E** (toggle Easy Mouse), then try to cross the edge. | Balloon shows Easy Mouse disabled, and the edge no longer switches. Press it again to re-enable. | |
 | 3.5 | In Settings > Machines, untick **Wrap the cursor around the outer edges** on both machines and save. Move off the far edge of the last machine. | Cursor no longer wraps. | |
+| 3.6 | **2 × 2:** in Settings on A, choose **Two rows** and drag B into the slot **below** A; save. Move the cursor off the **bottom** of A's screen. | The cursor appears on B; leaving B's top edge returns to A. Left/right edges of A no longer lead to B. | |
+| 3.7 | **Keyboard:** in Settings, click the layout, use the arrow keys to select a PC, press Ctrl+Right to move it, F2 to rename, and Esc to cancel the rename. | The tile moves and renames; Esc doesn't close Settings and Enter doesn't save it. | |
 
 ## 4. Clipboard
 
@@ -61,7 +63,7 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 4.1 | On A, copy some text (Ctrl+C), move to B, paste (Ctrl+V). | The same text is pasted on B. | |
 | 4.2 | Copy text on B, move to A, paste. | Works in the other direction too. | |
 | 4.3 | Copy a screenshot (Win+Shift+S) on A and paste into Paint on B. | Image is pasted. | |
-| 4.4 | **File copy:** on A, select a file of 1–50 MB in Explorer and press Ctrl+C. Move to B, click the desktop, press Ctrl+V. | File arrives in `Desktop\MouseWithoutBorders\` on B. | |
+| 4.4 | **File copy:** on A, select a file of 1–50 MB in Explorer and press Ctrl+C. Move the cursor to B. | When the cursor arrives on B, the file is saved to `Desktop\MouseWithoutBorders` on B and that folder opens. A file over 100 MB is refused this way (use drag and drop). | |
 | 4.5 | **Drag and drop:** drag a file from A's Explorer across the edge and drop it on B's desktop. | File arrives on B. | |
 | 4.6 | In Settings on A, untick **Share the clipboard** and save. Repeat 4.1. | Text is **not** transferred. Tick it again. | |
 

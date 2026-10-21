@@ -40,8 +40,7 @@ namespace MouseWithoutBorders.Lite
 
         private readonly TextBox keyBox = new();
         private readonly CheckBox showKey = new();
-        private readonly TextBox[] machineBoxes = new TextBox[LiteConfig.MaxMachines];
-        private readonly TableLayoutPanel machineGrid = new();
+        private readonly LayoutEditor layoutEditor = new();
         private readonly RadioButton oneRow = new();
         private readonly RadioButton twoRows = new();
         private readonly CheckBox wrapMouse = new();
@@ -236,24 +235,20 @@ namespace MouseWithoutBorders.Lite
             wrapMouse.Text = "Wrap the cursor around the outer edges";
             wrapMouse.AutoSize = true;
             wrapMouse.Margin = new Padding(em, 3, 3, 3);
-            oneRow.CheckedChanged += (s, e) => ArrangeMachineGrid();
+            oneRow.CheckedChanged += (s, e) => layoutEditor.OneRow = oneRow.Checked;
             modeRow.Controls.AddRange(new Control[] { oneRow, twoRows, wrapMouse });
             outer.Controls.Add(modeRow);
 
-            machineGrid.AutoSize = true;
-            machineGrid.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-            for (int i = 0; i < machineBoxes.Length; i++)
-            {
-                machineBoxes[i] = new TextBox { Width = em * 11, PlaceholderText = $"PC {i + 1} (empty)", CharacterCasing = CharacterCasing.Upper };
-            }
-
-            outer.Controls.Add(machineGrid);
+            layoutEditor.Font = Font;
+            layoutEditor.ThisPc = LiteConfig.NormalizeName(Environment.MachineName);
+            layoutEditor.Margin = new Padding(3, em / 2, 3, em / 2);
+            outer.Controls.Add(layoutEditor);
 
             var helpRow = NewFlow();
             var addThis = new LinkLabel { Text = "Add this PC", AutoSize = true, Margin = new Padding(3, 3, em, 3) };
             addThis.LinkClicked += (s, e) => AddThisPc();
             helpRow.Controls.Add(addThis);
-            helpRow.Controls.Add(NewHint("Computer names in screen order (left to right). Use the same list on every PC."));
+            helpRow.Controls.Add(NewHint("Drag the PCs to match where they sit. Double-click to rename or add, Delete to remove. Other PCs follow when you save."));
             outer.Controls.Add(helpRow);
 
             return NewGroup("Machines and layout", outer);
@@ -378,23 +373,6 @@ namespace MouseWithoutBorders.Lite
             return row;
         }
 
-        private void ArrangeMachineGrid()
-        {
-            machineGrid.SuspendLayout();
-            machineGrid.Controls.Clear();
-            machineGrid.ColumnStyles.Clear();
-            machineGrid.RowStyles.Clear();
-            int columns = oneRow.Checked ? 4 : 2;
-            machineGrid.ColumnCount = columns;
-            machineGrid.RowCount = LiteConfig.MaxMachines / columns;
-            for (int i = 0; i < machineBoxes.Length; i++)
-            {
-                machineGrid.Controls.Add(machineBoxes[i], i % columns, i / columns);
-            }
-
-            machineGrid.ResumeLayout();
-        }
-
         private void SetAdvancedVisible(bool visible)
         {
             advancedGroup.Visible = visible;
@@ -404,20 +382,14 @@ namespace MouseWithoutBorders.Lite
         private void AddThisPc()
         {
             string me = LiteConfig.NormalizeName(Environment.MachineName);
-            if (machineBoxes.Any(b => string.Equals(b.Text.Trim(), me, StringComparison.OrdinalIgnoreCase)))
+            if (layoutEditor.Slots.Contains(me, StringComparer.OrdinalIgnoreCase))
             {
-                SetStatus(me + " is already in the list.", ok: true);
-                return;
+                SetStatus(me + " is already in the layout.", ok: true);
             }
-
-            var empty = machineBoxes.FirstOrDefault(b => b.Text.Trim().Length == 0);
-            if (empty == null)
+            else if (!layoutEditor.AddName(me))
             {
                 SetStatus("All 4 slots are used.", ok: false);
-                return;
             }
-
-            empty.Text = me;
         }
 
         // ---- values -------------------------------------------------------------------------
@@ -425,14 +397,10 @@ namespace MouseWithoutBorders.Lite
         private void LoadValues(LiteConfig cfg)
         {
             keyBox.Text = cfg.SecurityKey;
-            for (int i = 0; i < machineBoxes.Length; i++)
-            {
-                machineBoxes[i].Text = i < cfg.Machines.Count ? cfg.Machines[i] : string.Empty;
-            }
-
+            layoutEditor.Slots = cfg.MatrixSlots();
             oneRow.Checked = cfg.Layout.OneRow;
             twoRows.Checked = !cfg.Layout.OneRow;
-            ArrangeMachineGrid();
+            layoutEditor.OneRow = cfg.Layout.OneRow;
             wrapMouse.Checked = cfg.Layout.WrapMouse;
 
             shareClipboard.Checked = cfg.ShareClipboard;
@@ -514,7 +482,7 @@ namespace MouseWithoutBorders.Lite
             var cfg = loaded.Clone();
             cfg.SecurityKey = keyBox.Text;
 
-            var names = machineBoxes.Select(b => b.Text).ToList();
+            var names = layoutEditor.Slots.ToList();
             while (names.Count > 0 && string.IsNullOrWhiteSpace(names[^1]))
             {
                 names.RemoveAt(names.Count - 1);

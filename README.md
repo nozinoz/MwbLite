@@ -91,7 +91,7 @@ one every PC will use.
 
 The new PC receives the security key, the machine list (with itself added), the layout and the port. Both PCs
 save and apply them at once, and any PCs already connected pick up the new layout automatically. Then tick
-**Start with Windows** on the new PC too. Rearrange the order under **Machines and layout** on any PC; the others
+**Start with Windows** on the new PC too. Drag the tiles under **Machines and layout** on any PC to match your desk; the others
 follow.
 
 You can still do it by hand instead: **Copy** the key from one PC, paste it on the others, and enter the same
@@ -149,8 +149,15 @@ Left-click the tray icon, or choose **Settings…**, to edit settings.json witho
 - **Pairing.** Shows this PC's name. The security key has **Show**, **Generate** (a new random key) and
   **Copy** buttons. **Add a PC…** / **Join…** pair with a code (see
   [First-time setup](#first-time-setup-pair-with-a-code)).
-- **Machines and layout.** Four name boxes in screen order. They regroup as a 2×2 grid when you choose **Two
-  rows**.
+- **Machines and layout.** Your PCs as tiles in MWB's 4 slots. **Drag a PC** onto another slot to move it there;
+  it swaps with whatever is in that slot. **One row** places them left to right; **Two rows (2 × 2)** turns the
+  slots into a grid (`[1][2]` over `[3][4]`) for a PC above or below another.
+  - Double-click a tile or an empty slot to rename or add a PC; press Delete to remove one. The right-click menu
+    does the same.
+  - Keyboard: the arrow keys select a slot, Ctrl+arrows move the selected PC, and F2 renames.
+  - This PC is highlighted. Save, and the other connected PCs take the new arrangement and save it too.
+
+  ![Two rows](docs/layout-grid.png)
 - **Options.** Clipboard, file transfer, start with Windows, service mode.
 - **Show advanced settings.** Port, Easy Mouse, hotkeys, name-to-IP mappings and the less common switches.
 - **Save & apply** validates first, using the same checks as Reload config. If something is wrong, the window
@@ -163,6 +170,39 @@ Left-click the tray icon, or choose **Settings…**, to edit settings.json witho
 - **Open JSON…** opens the file in Notepad for anything else.
 - **It runs as you.** In service mode the tray belongs to a SYSTEM process, so the window opens as a separate
   `MwbLite.exe --settings` process with your token, never as SYSTEM.
+
+## Arranging the PCs
+
+Open Settings and drag the tiles under **Machines and layout** until they match where the PCs sit on your desk,
+then press **Save & apply**. The cursor moves to a PC by leaving the screen on that side.
+
+- **One row:** tiles left to right. With `LAPTOP1, MINIPC, LAPTOP2`, the mini PC's left edge leads to LAPTOP1 and
+  its right edge to LAPTOP2.
+- **Two rows (2 × 2):** for a PC above or below another. Leave a slot empty where there's no PC; that edge then
+  doesn't switch.
+- **Wrap the cursor around the outer edges:** leaving the last PC brings you back to the first. Untick it to cross
+  only between PCs that are next to each other.
+- **Each PC counts as one screen**, however many monitors it has. MWB uses the outer edges of that PC's whole
+  desktop; the edges between its own monitors work as normal Windows.
+- **Offline PCs and empty slots are skipped.** With LAPTOP1 asleep, the cursor goes to the next PC that's online.
+- **Keyboard:** Ctrl+Alt+F1…F4 jump to the PC in slot 1…4. To use Ctrl+Alt+1…4 instead, change "Switch to PC"
+  under advanced settings.
+- **Only two shapes:** MWB supports a row of up to 4 or a 2×2 grid, not free-form positions.
+
+## Copying files between PCs
+
+This is MWB's own file transfer, unchanged. It needs **Share the clipboard** and **Transfer files** turned on
+(both are on by default).
+
+- **Copy and paste:** select a file in Explorer and press Ctrl+C, then move to the other PC. The file is fetched
+  when you switch, saved to the **`MouseWithoutBorders`** folder on that PC's desktop, and the folder opens.
+  Limit: **one file, up to 100 MB**.
+- **Drag and drop:** drag a file out of Explorer, across the screen edge onto the other PC, and drop it. It also
+  arrives in `Desktop\MouseWithoutBorders`, and there's **no 100 MB limit**.
+- **Not supported:** folders (zip them first) and several files at once (one at a time). Files always arrive in
+  `Desktop\MouseWithoutBorders`, not where you drop them.
+- Both directions work, between any two paired PCs. Transfers use the same encrypted connection as everything
+  else.
 
 ## Configuration: `%LOCALAPPDATA%\MwbLite\settings.json`
 
