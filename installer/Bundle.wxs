@@ -12,6 +12,7 @@
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication Theme="rtfLicense"
                                               LicenseFile="License.rtf"
+                                              LocalizationFile="RtfTheme.wxl"
                                               LaunchTarget="[ProgramFiles64Folder]MwbLite\MwbLite.exe"
                                               ShowVersion="yes"
                                               SuppressOptionsUI="yes" />

@@ -41,7 +41,17 @@
       <ComponentRef Id="StartMenuShortcuts" />
     </Feature>
 
-    <!-- Close running copies (including the SYSTEM instances) before files are replaced or removed. -->
+    <!--
+      Stop every running MwbLite (tray, Settings window, helper and the SYSTEM service-mode instances, from any
+      older version) BEFORE Windows Installer checks for files in use (InstallValidate). Otherwise an upgrade stops at
+      a "files in use" prompt that can't close the window-less SYSTEM instances, and Restart Manager may be disabled
+      by policy. taskkill is used because older MwbLite versions have no stop command. Runs hidden; failures (e.g.
+      nothing running) are ignored.
+    -->
+    <SetProperty Id="WixQuietExecCmdLine" Value="&quot;[System64Folder]taskkill.exe&quot; /F /IM MwbLite.exe /IM MwbLite.Helper.exe" Before="StopRunningMwbLite" Sequence="execute" />
+    <CustomAction Id="StopRunningMwbLite" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
+
+    <!-- Backup: close anything started again before files are replaced or removed. -->
     <util:CloseApplication Id="CloseMwbLite" Target="MwbLite.exe" CloseMessage="yes" ElevatedCloseMessage="yes" TerminateProcess="1" RebootPrompt="no" Timeout="3" />
     <util:CloseApplication Id="CloseMwbLiteHelper" Target="MwbLite.Helper.exe" CloseMessage="yes" TerminateProcess="1" RebootPrompt="no" Timeout="3" />
 
@@ -49,6 +59,7 @@
     <CustomAction Id="RemoveStartupEntry" FileRef="MwbLiteExe" ExeCommand="--remove-startup" Execute="deferred" Impersonate="yes" Return="ignore" />
     <CustomAction Id="RemoveServiceData" FileRef="MwbLiteExe" ExeCommand="--uninstall-cleanup" Execute="deferred" Impersonate="no" Return="ignore" />
     <InstallExecuteSequence>
+      <Custom Action="StopRunningMwbLite" Before="InstallValidate" />
       <Custom Action="RemoveStartupEntry" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="RemoveServiceData" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
