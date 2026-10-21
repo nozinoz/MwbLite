@@ -5,7 +5,7 @@
     - the app (self-contained, one shared .NET runtime for MwbLite.exe and MwbLite.Helper.exe)
     - Start menu shortcuts "MwbLite" and "MwbLite Settings"
     - the MwbLite.Service service (demand start; local users may start/stop it, as with the install command)
-    - an inbound firewall rule for MwbLite.exe, TCP, local subnet only
+    - inbound firewall rules for MwbLite.exe, local subnet only: TCP (MWB + pairing), UDP 15102 (pairing discovery)
     - HKLM\SOFTWARE\MwbLite\InstallSource=msi (the app then leaves service/firewall management to this package)
   Uninstall also removes %ProgramData%\MwbLite (the service's copy of the key) and the user's Run entry.
   Per-user settings (%LOCALAPPDATA%\MwbLite) are kept.
@@ -64,6 +64,7 @@
     <Component Id="MainExe" Directory="INSTALLFOLDER">
       <File Id="MwbLiteExe" Source="$(var.PayloadDir)\MwbLite.exe" KeyPath="yes">
         <fw:FirewallException Id="FirewallMwbLite" Name="MwbLite" Description="MwbLite (Mouse Without Borders) connections from PCs on the local network" Protocol="tcp" Scope="localSubnet" Profile="all" />
+        <fw:FirewallException Id="FirewallMwbLitePairing" Name="MwbLite pairing" Description="MwbLite: lets new PCs on the local network find this PC while Add a PC is open" Protocol="udp" Port="15102" Scope="localSubnet" Profile="all" />
       </File>
 
       <ServiceInstall Id="MwbLiteService"

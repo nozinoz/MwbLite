@@ -28,18 +28,22 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 1.4 | Check `%LOCALAPPDATA%\MwbLite\logs\mwblite.log`. | Contains `Keyboard/Mouse hooks installed`, `TCP listening on port: 15100` and `15101`, and `Helper process started`. | |
 | 1.5 | Task Manager > Details. | `MwbLite.exe` and `MwbLite.Helper.exe` are running from `C:\Program Files\MwbLite`. No PowerToys processes are needed. | |
 
-## 2. Pairing with the security key
+## 2. Pairing with a code
 
 | # | Step | Expected | Result |
 |---|---|---|---|
-| 2.1 | On **A**, open **Settings**, press **Copy** next to the key, and enter the machines as you sit, e.g. `LAPTOP1`, `MINIPC` (laptop to the left). | — | |
-| 2.2 | On **A**, press **Save & apply**. | The window closes; balloon: "Configuration reloaded." | |
-| 2.3 | On **B**, open **Settings**, paste the **same** key (MWB is not connected yet, so type or transfer it another way) and enter the **same** machine list. Press **Save & apply**. | Balloon: "Configuration reloaded." | |
-| 2.4 | If a Windows Firewall prompt appeared on either machine at first start, allow **Private** networks. In normal mode without `--install`, you may need to restart MwbLite after allowing. | — | |
-| 2.5 | Within about 10 s, hover the tray icon on A. Right-click it. | The menu lists both machine names under Exit (the connected machines). | |
-| 2.6 | **Negative test:** in Settings on B, change one character of the key and save. | A and B stop working together (B can't be reached from A). The logs show connection or handshake errors. | |
-| 2.7 | Restore the correct key on B and save. Also try a 10-character key: Save should refuse it and show a red message, keeping the window open. | They reconnect. Short key rejected. | |
-
+| 2.1 | On **A**, open **Settings**, tick **Start with Windows**, press **Save & apply**. | Balloon: "Configuration reloaded." | |
+| 2.2 | On **A**: Settings > **Add a PC…** | A window says it is waiting for a PC to join. | |
+| 2.3 | On **B**: Settings > **Join…** | Within a few seconds **A**'s name appears in the list. (If not, type A's computer name in the box below the list.) | |
+| 2.4 | On **B**, select A and press **Join**. | Both windows show the **same** 6-digit code. A's window says "B wants to join". | |
+| 2.5 | Press **Codes match** on **A**, then on **B**. | Both windows report success; B's Settings now shows A's key (press Show to compare) and the list `A, B`. A's list shows `A, B`. | |
+| 2.6 | Within about 10 s, right-click the tray icon on A. | The menu lists both machine names under Exit (the connected machines). | |
+| 2.7 | **Cancel test:** repeat 2.2–2.4 and press **Cancel** on B at the code step. | A's window says pairing was cancelled on the other PC; nothing changes on either PC. | |
+| 2.8 | **Different-code test (optional):** start Add a PC on A and Join from B, but press Codes match on only one PC and Cancel on the other. | No settings change on either PC. | |
+| 2.9 | If a Windows Firewall prompt appeared on either machine, allow **Private** networks. (With Setup, the rules are added automatically.) | — | |
+| 2.10 | **Wrong key:** in Settings on B, change one character of the key and save. | A and B stop working together (B can't be reached from A). The logs show connection or handshake errors. | |
+| 2.11 | Pair again with a code (2.2–2.5). Also try typing a 10-character key in Settings and saving. | They reconnect. The short key is refused with a red message. | |
+| 2.12 | **Arrange:** on A, swap the order under Machines and layout (e.g. `B, A`) and save. Then exit and restart MwbLite on B. | B's Settings shows the new order, both before and after the restart. | |
 ## 3. Cursor crossing the screen edge
 
 | # | Step | Expected | Result |
@@ -97,7 +101,7 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 
 | # | Step | Expected | Result |
 |---|---|---|---|
-| 8.1 | Add C to `machines` on **all three** machines (same order everywhere) and reload. | Tray menu on A lists all three. | |
+| 8.1 | Pair C with A: Settings > Add a PC… on A, Join… on C, confirm the code on both. | C joins; within about 10 s **B**'s Settings also lists A, B, C (B was not touched). The tray menu on A lists all three. Restart B: the list stays. | |
 | 8.2 | Cross A → B → C and back. Copy and paste text from C to A. | Works. | |
 
 ## 9. Uninstall (optional, if you want to verify clean removal)

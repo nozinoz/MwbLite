@@ -79,6 +79,16 @@ namespace MouseWithoutBorders.Lite
                         LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");
                         return ApplyConfig();
 
+                    // Started (as the user) by a service-mode instance after a peer changed the layout.
+                    case "--set-layout":
+                        LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");
+                        if (args.Length >= 5 && bool.TryParse(args[3], out bool oneRow) && bool.TryParse(args[4], out bool wrap))
+                        {
+                            _ = LiteLayoutSync.TryPersist(LitePaths.UserSettingsFile, args[2].Split(','), oneRow, wrap);
+                        }
+
+                        return 0;
+
                     // Run by the Setup uninstaller as the installing user: remove the per-user start-with-Windows entry.
                     case "--remove-startup":
                         LiteStartup.Sync(false, LitePaths.ExePath);
@@ -236,7 +246,7 @@ namespace MouseWithoutBorders.Lite
                     {
                         _ = LiteServiceControl.Unregister();
                         KillMwbProcesses(parentPid);
-                        RunNetsh($"advfirewall firewall delete rule name=\"{FirewallRuleName}\"");
+                        DeleteFirewallRules();
                         LiteLog.Write(nameof(LiteCommands), "Uninstall: service and firewall rule removed.");
                         DeleteDirectory(LitePaths.ServiceDir);
                         DeleteDirectory(LitePaths.InstallDir);
@@ -304,12 +314,20 @@ namespace MouseWithoutBorders.Lite
             }
         }
 
-        // Inbound TCP to MWB's two ports (tcpPort = clipboard/files, tcpPort+1 = input/control), for this
-        // program only, from the local subnet only. (Upstream allowed the program from any address.)
+        // Inbound rules for this program only, from the local subnet only (upstream allowed any address):
+        // MWB on tcpPort (clipboard/files) and tcpPort+1 (input/control), pairing on TCP and UDP 15102.
         private static void SetFirewallRule(string exe, int tcpPort)
         {
+            int pairing = Pairing.PairingDefaults.Port;
+            DeleteFirewallRules();
+            RunNetsh($"advfirewall firewall add rule name=\"{FirewallRuleName}\" dir=in action=allow program=\"{exe}\" enable=yes profile=any protocol=tcp localport={tcpPort},{tcpPort + 1},{pairing} remoteip=localsubnet");
+            RunNetsh($"advfirewall firewall add rule name=\"{FirewallRuleName} pairing\" dir=in action=allow program=\"{exe}\" enable=yes profile=any protocol=udp localport={pairing} remoteip=localsubnet");
+        }
+
+        private static void DeleteFirewallRules()
+        {
             RunNetsh($"advfirewall firewall delete rule name=\"{FirewallRuleName}\"");
-            RunNetsh($"advfirewall firewall add rule name=\"{FirewallRuleName}\" dir=in action=allow program=\"{exe}\" enable=yes profile=any protocol=tcp localport={tcpPort},{tcpPort + 1} remoteip=localsubnet");
+            RunNetsh($"advfirewall firewall delete rule name=\"{FirewallRuleName} pairing\"");
         }
 
         private static void RunNetsh(string arguments)

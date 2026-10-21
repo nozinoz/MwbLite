@@ -212,6 +212,7 @@ namespace MouseWithoutBorders.Class
                 Application.SetCompatibleTextRenderingDefault(false);
 
                 InitAndCleanup.Init();
+                LiteLayoutSync.SeedPool(MachineStuff.MachineMatrix);
 
                 if (runningAsSystem)
                 {

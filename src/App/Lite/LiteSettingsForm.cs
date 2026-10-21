@@ -34,7 +34,7 @@ namespace MouseWithoutBorders.Lite
         };
 
         private readonly string settingsPath;
-        private readonly LiteConfig loaded;
+        private LiteConfig loaded;
         private readonly Action<LiteConfig> afterSave;
         private readonly int em;
 
@@ -99,6 +99,7 @@ namespace MouseWithoutBorders.Lite
 
             BuildLayout();
             LoadValues(config);
+            _ = HasUnsavedChanges(); // capture the baseline
         }
 
         /// <summary>Loads settings.json (creating it if missing) and returns the window, or null if the user cancelled.</summary>
@@ -211,7 +212,14 @@ namespace MouseWithoutBorders.Lite
             grid.Controls.Add(keyRow);
 
             grid.Controls.Add(new Label());
-            grid.Controls.Add(NewHint("Use exactly the same key on every PC (at least 16 characters)."));
+            grid.Controls.Add(NewHint("Use exactly the same key on every PC (at least 16 characters), or pair with a code:"));
+
+            grid.Controls.Add(new Label());
+            var pairRow = NewFlow();
+            pairRow.Controls.Add(NewButton("Add a PC…", (s, e) => RunPairing(host: true)));
+            pairRow.Controls.Add(NewButton("Join…", (s, e) => RunPairing(host: false)));
+            pairRow.Controls.Add(NewHint("Add a PC on a PC that is set up; Join on the new PC. Both show a code to compare."));
+            grid.Controls.Add(pairRow);
 
             return NewGroup("Pairing", grid);
         }
@@ -456,6 +464,51 @@ namespace MouseWithoutBorders.Lite
         }
 
         /// <summary>Builds the config to save: the loaded config (so fields not on the form survive) with the form's values.</summary>
+        private void RunPairing(bool host)
+        {
+            if (HasUnsavedChanges())
+            {
+                SetStatus("Save your changes first (Save & apply), then pair.", ok: false);
+                return;
+            }
+
+            using var dialog = new Pairing.PairingForm(host, settingsPath);
+            _ = dialog.ShowDialog(this);
+            if (dialog.SavedConfig == null)
+            {
+                return;
+            }
+
+            // The pairing already saved settings.json; show and apply what it saved.
+            loaded = dialog.SavedConfig;
+            LoadValues(loaded);
+            baseline = null;
+            _ = HasUnsavedChanges();
+            SetStatus("Paired. Settings saved and applied.", ok: true);
+            afterSave?.Invoke(loaded);
+        }
+
+        // What the form showed right after loading, so differences in formatting (e.g. "f1" vs "F1") are not "changes".
+        private string baseline;
+
+        private bool HasUnsavedChanges()
+        {
+            static string Canonical(LiteConfig c)
+            {
+                var copy = c.Clone();
+                var slots = copy.MatrixSlots().ToList();
+                while (slots.Count > 0 && slots[^1].Length == 0)
+                {
+                    slots.RemoveAt(slots.Count - 1);
+                }
+
+                copy.Machines = slots;
+                return System.Text.Json.JsonSerializer.Serialize(copy, LiteConfig.JsonOptions);
+            }
+
+            return Canonical(ReadValues()) != (baseline ??= Canonical(ReadValues()));
+        }
+
         private LiteConfig ReadValues()
         {
             var cfg = loaded.Clone();

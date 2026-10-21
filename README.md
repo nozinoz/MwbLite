@@ -64,23 +64,38 @@ then **Launch**. Setup:
 - adds **MwbLite** and **MwbLite Settings** to the Start menu;
 - registers the **MwbLite.Service** Windows service (demand start; local users may start and stop it), used for
   lock screen and UAC prompt control;
-- adds an inbound Windows Firewall rule for `MwbLite.exe`: TCP, from the **local subnet** only;
+- adds inbound Windows Firewall rules for `MwbLite.exe`, from the **local subnet** only: TCP (MWB and pairing) and UDP 15102 (finding PCs for pairing);
 - closes running copies of MwbLite first, so re-running a newer Setup **upgrades in place** and keeps your
   settings.
 
 **Uninstall** removes all of that, plus `%ProgramData%\MwbLite` and your start-with-Windows entry. Your own
 settings in `%LOCALAPPDATA%\MwbLite` are kept.
 
-### First-time setup (each PC)
+### First-time setup: pair with a code
 
 MwbLite starts in the tray. On first run it creates `%LOCALAPPDATA%\MwbLite\settings.json` with a random
 security key and shows a balloon. Left-click the tray icon to open **Settings** (see
-[Settings window](#settings-window)):
+[Settings window](#settings-window)).
 
-1. On the first PC, press **Copy** next to the security key. On every other PC, paste that key.
-2. Enter the same computer names, in screen order, on every PC. **Add this PC** fills in the current computer.
-3. Tick **Start with Windows**.
-4. Press **Save & apply**. The change takes effect immediately.
+**First PC** (e.g. the mini PC): tick **Start with Windows** and press **Save & apply**. Its random key is the
+one every PC will use.
+
+**Each other PC**, one at a time, with both PCs on the same network:
+
+1. On the first PC: Settings > **Add a PC…** It waits up to 5 minutes.
+2. On the new PC: Settings > **Join…** It lists the PCs that are waiting; pick one and press **Join** (or type its
+   name if it isn't listed).
+3. Both PCs show the same 6-digit code. Check they match and press **Codes match** on **both**.
+
+![Pairing code](docs/pairing-code.png)
+
+The new PC receives the security key, the machine list (with itself added), the layout and the port. Both PCs
+save and apply them at once, and any PCs already connected pick up the new layout automatically. Then tick
+**Start with Windows** on the new PC too. Rearrange the order under **Machines and layout** on any PC; the others
+follow.
+
+You can still do it by hand instead: **Copy** the key from one PC, paste it on the others, and enter the same
+machine names everywhere. See [How pairing works](#how-pairing-works).
 
 ### Lock screen and UAC prompts (service mode)
 
@@ -100,7 +115,7 @@ From then on, at sign-in:
 
 Copy `dist\portable\` anywhere and run `MwbLite.exe`. Windows Firewall will ask on first run; allow
 **private networks**. For service mode without Setup, run `MwbLite.exe --install` (UAC). It copies the exes to
-`C:\Program Files\MwbLite`, registers the service, adds a firewall rule for `tcpPort`/`tcpPort+1` from the local
+`C:\Program Files\MwbLite`, registers the service, adds firewall rules (TCP `tcpPort`, `tcpPort+1` and 15102, UDP 15102) from the local
 subnet, and copies your settings to `%ProgramData%`. `MwbLite.exe --uninstall` removes it again. These two
 commands do nothing on a PC where Setup installed MwbLite.
 
@@ -115,6 +130,7 @@ commands do nothing on a PC where Setup installed MwbLite.
 | `MwbLite.exe --install` | UAC | Portable only: install service, firewall rule and Program Files copy (see above). |
 | `MwbLite.exe --uninstall` | UAC | Portable only: remove what `--install` added. |
 | `MwbLite.exe --service` | — | Service entry point. The Service Control Manager uses this; don't run it by hand. |
+| `MwbLite.exe --set-layout …` | — | Internal: a service-mode instance uses it to save a layout received from another PC into your settings.json. |
 
 ### Tray menu
 
@@ -131,7 +147,8 @@ commands do nothing on a PC where Setup installed MwbLite.
 Left-click the tray icon, or choose **Settings…**, to edit settings.json without touching JSON.
 
 - **Pairing.** Shows this PC's name. The security key has **Show**, **Generate** (a new random key) and
-  **Copy** buttons.
+  **Copy** buttons. **Add a PC…** / **Join…** pair with a code (see
+  [First-time setup](#first-time-setup-pair-with-a-code)).
 - **Machines and layout.** Four name boxes in screen order. They regroup as a 2×2 grid when you choose **Two
   rows**.
 - **Options.** Clipboard, file transfer, start with Windows, service mode.
@@ -146,13 +163,16 @@ Left-click the tray icon, or choose **Settings…**, to edit settings.json witho
 - **Open JSON…** opens the file in Notepad for anything else.
 - **It runs as you.** In service mode the tray belongs to a SYSTEM process, so the window opens as a separate
   `MwbLite.exe --settings` process with your token, never as SYSTEM.
+
 ## Configuration: `%LOCALAPPDATA%\MwbLite\settings.json`
 
-The file is JSON. `//` comments and trailing commas are allowed. The MWB engine **never writes this file**. Only
-two things do:
+The file is JSON. `//` comments and trailing commas are allowed. Three things write it:
+
 - MwbLite creates it when it's missing.
-- The Settings window rewrites it when you press **Save & apply**, keeping the previous file as
-  `settings.json.bak`.
+- The Settings window rewrites it when you press **Save & apply**, or after pairing.
+- A layout change received from another of your PCs (machines, one row/two rows, wrap) is saved into it.
+
+Each write keeps the previous file as `settings.json.bak`.
 
 Values MWB changes while running (machine IDs, learned machine pool, last cursor position) go to `state.json`
 next to it.
@@ -222,6 +242,38 @@ file and reload. `tcpPort` and `useService` changes need a restart: Exit, then s
 | `%LOCALAPPDATA%\MwbLite\logs\` | `mwblite.log`, `helper.log`, `commands.log` (4 MB cap each, one `.1` rollover). |
 | `%ProgramData%\MwbLite\` | Service mode: protected copy of settings.json, state.json, and logs (`mwblite-system.log`, `service.log`, `install.log`). SYSTEM and Administrators only. |
 | `C:\Program Files\MwbLite\` | Installed binaries (`--install`). |
+
+## How pairing works
+
+PCs trust each other because they share the **security key**; there is no per-device approval. Getting the same
+key and the same machine list onto every PC *is* pairing. You can do it in two ways:
+
+- **With a code** (Settings > Add a PC… / Join…). This is a separate, short-lived exchange in front of MWB:
+  1. The joining PC finds PCs in "Add a PC" mode with a UDP broadcast on port 15102, or uses the name you typed.
+  2. It connects to TCP 15102 and the two PCs run an elliptic-curve Diffie-Hellman exchange (P-256). The joining
+     PC first commits to its key with a hash (as in Bluetooth "compare numbers" pairing), so an attacker can't
+     search for keys that make both screens match.
+  3. Both PCs derive the same 6-digit code from the exchange and show it. You confirm it on **both** PCs.
+  4. Only then does the existing PC send the security key, the machine list (with the new PC added), the layout
+     and the port, encrypted with AES-256-GCM. Both PCs save and apply them.
+
+  Everything uses .NET's built-in cryptography. "Add a PC" accepts one PC per session, for up to 5 minutes; if
+  the codes differ, press Cancel and nothing changes.
+- **By hand.** Copy the key and type the same machine names on every PC.
+
+**Once paired, MWB connects** using upstream's protocol, unchanged. Each PC connects to the others by name on
+TCP `tcpPort`+1 (input and control) and `tcpPort` (clipboard and files). Each connection derives an AES-256 key
+from the security key (PBKDF2-SHA512, 100,000 iterations, fresh random salt and IV). A challenge-response
+handshake proves both sides have the key; a wrong key is dropped after 10 bad packets. The key itself never
+crosses the network after pairing.
+
+**Layout** (machine order, one row or two, wrap) is shared. A change made in Settings on one PC is sent to the
+connected PCs, and each saves it to its own settings.json. MwbLite also pre-loads the configured names into MWB's
+machine pool, as upstream's pairing did. Without that, MWB would reorder the layout the first time it met a PC
+it didn't know.
+
+**To remove a PC or revoke a key**, press **Generate** on one PC and pair the PCs you want to keep again (or copy
+the new key to them). A PC with the old key can no longer connect.
 
 ## What was removed or replaced
 
@@ -297,8 +349,12 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
   config" start `MwbLite.exe --settings` / `--open-config` / `--apply-config` with **your** token.
 - **Install location:** the service binary lives in `C:\Program Files\MwbLite` (admin-only write), never in a
   user-writable folder.
-- **Firewall:** the rule (Setup or `--install`) allows only `MwbLite.exe`, TCP, from the local subnet. Upstream
+- **Firewall:** the rules (Setup or `--install`) allow only `MwbLite.exe`, from the local subnet. Upstream
   allowed the program from any address.
+- **Pairing with a code** hands over the security key only after you confirm the same 6-digit code on both PCs.
+  The exchange uses ECDH (P-256) with a hash commitment and AES-256-GCM, built from .NET's own cryptography. An
+  attacker on the network gets one guess in a million at making both screens match. `Add a PC` accepts one PC per
+  session, for up to 5 minutes. See [How pairing works](#how-pairing-works).
 - **No outbound calls** other than to the MWB peers you configure: no telemetry, update checks or crash
   reporting.
 
@@ -306,11 +362,9 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
 
 - **Simple settings UI only.** The Settings window replaces the classic MWB settings form and setup wizard. The
   screen-capture menu items, "About" and "Generate log" are hidden.
-- **Up to 4 machines** (MWB limit). Keep `machines` and `securityKey` identical on all PCs. MWB syncs layout
-  changes between connected PCs at runtime (kept in memory until Reload or restart), so differing lists cause the
-  layout to flip-flop.
-- **Some runtime changes are lost on restart.** These include Easy Mouse toggled by hotkey and a layout received
-  from a peer, because the engine never writes settings.json.
+- **Up to 4 machines** (MWB limit). The layout is shared: MWB sends layout changes to the connected PCs and each
+  one saves them. If two PCs are edited at the same time, the last change wins.
+- **Easy Mouse toggled by hotkey is not saved**; it returns to the setting in settings.json on restart.
 - **Service mode starts at logon.** The service is demand-start (as in PowerToys) and is started by the Run entry
   when you log on. Lock screen and UAC control therefore work after your first logon, not at the cold-boot login
   screen.

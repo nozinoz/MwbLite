@@ -183,6 +183,7 @@ namespace MouseWithoutBorders.Class
             if (!Enumerable.SequenceEqual(last.MatrixSlots(), cfg.MatrixSlots()))
             {
                 MachineStuff.MachineMatrix = null; // Forces read next time it's needed.
+                LiteLayoutSync.SeedPool(cfg.MatrixSlots());
                 shouldSendMachineMatrix = true;
             }
 
@@ -262,10 +263,25 @@ namespace MouseWithoutBorders.Class
 
         internal void SetMachineMatrix(IEnumerable<string> machineNames)
         {
+            string[] names = machineNames.Select(LiteConfig.NormalizeName).ToArray();
             lock (_loadingSettingsLock)
             {
-                // Runtime change (e.g. matrix received from a peer): in memory only.
-                _config.Machines = machineNames.Select(LiteConfig.NormalizeName).ToList();
+                // Runtime change (normally a layout received from a peer).
+                _config.Machines = names.ToList();
+            }
+
+            // Live instance only: saved to the settings file after a short delay and pre-loaded into the machine pool.
+            RuntimeLayoutChanged?.Invoke(names);
+        }
+
+        /// <summary>Set on Setting.Values only (see LiteLayoutSync); test instances have no side effects.</summary>
+        internal Action<string[]> RuntimeLayoutChanged { get; init; }
+
+        internal (string[] Machines, bool OneRow, bool WrapMouse) LayoutSnapshot()
+        {
+            lock (_loadingSettingsLock)
+            {
+                return (_config.MatrixSlots(), _config.Layout.OneRow, _config.Layout.WrapMouse);
             }
         }
 
@@ -1093,7 +1109,7 @@ namespace MouseWithoutBorders.Class
 
     public static class Setting
     {
-        internal static Settings Values = new Settings(CreatePairingKeyCodec());
+        internal static Settings Values = new Settings(CreatePairingKeyCodec()) { RuntimeLayoutChanged = LiteLayoutSync.OnRuntimeLayoutChange };
 
         // MwbLite: the key is stored as plain text in every mode. Upstream's DPAPI codec protected the
         // SYSTEM instance's key inside a user-writable file; MwbLite instead keeps the SYSTEM instance's
