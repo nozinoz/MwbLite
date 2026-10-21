@@ -77,6 +77,12 @@ if (-not $SkipTests) {
 }
 
 # --- 3. Publish --------------------------------------------------------------------------------
+$running = Get-Process -Name 'MwbLite', 'MwbLite.Helper' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -and $_.Path.StartsWith($dist, [StringComparison]::OrdinalIgnoreCase) }
+if ($running) {
+    throw "MwbLite is running from $dist (PID $($running.Id -join ', ')). Exit it from the tray menu, then run the build again."
+}
+
 if (Test-Path $dist) {
     Remove-Item -Recurse -Force $dist
 }

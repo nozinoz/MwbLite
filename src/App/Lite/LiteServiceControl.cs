@@ -80,6 +80,21 @@ namespace MouseWithoutBorders.Lite
             }
         }
 
+        internal static bool IsInstalled()
+        {
+            try
+            {
+                ServiceController[] services = ServiceController.GetServices();
+                bool found = Array.Exists(services, s => string.Equals(s.ServiceName, LitePaths.ServiceName, StringComparison.OrdinalIgnoreCase));
+                Array.ForEach(services, s => s.Dispose());
+                return found;
+            }
+            catch (Exception e) when (e is InvalidOperationException or Win32Exception)
+            {
+                return false;
+            }
+        }
+
         internal static void Stop()
         {
             try

@@ -119,6 +119,63 @@ public sealed class LiteConfigTests
     }
 
     [TestMethod]
+    public void SaveRoundTripsKeepsABackupAndPreservesFieldsNotOnTheForm()
+    {
+        string path = Write("""
+            {
+              // hand-written comment
+              "securityKey": "0123456789abcdef",
+              "machines": ["PC1"],
+              "advanced": { "easyMouseFullscreenExcludedApps": ["game.exe"] }
+            }
+            """);
+        string original = File.ReadAllText(path);
+        Assert.IsTrue(LiteConfig.HasComments(path));
+
+        var cfg = LiteConfig.TryLoad(path, out var errors, out _)!;
+        Assert.AreEqual(0, errors.Count, string.Join("; ", errors));
+        cfg.Machines = new() { "pc1", "pc2" };
+        cfg.Advanced.Hotkeys.Reconnect = "Ctrl+Shift+R";
+        cfg.Normalize();
+        cfg.Save(path);
+
+        Assert.AreEqual(original, File.ReadAllText(path + ".bak"));
+        Assert.IsFalse(LiteConfig.HasComments(path));
+        Assert.IsFalse(File.Exists(path + ".tmp"));
+
+        var reloaded = LiteConfig.TryLoad(path, out errors, out _);
+        Assert.IsNotNull(reloaded, string.Join("; ", errors));
+        CollectionAssert.AreEqual(new[] { "PC1", "PC2" }, reloaded!.Machines);
+        Assert.AreEqual("Ctrl+Shift+R", reloaded.Advanced.Hotkeys.Reconnect);
+        CollectionAssert.AreEqual(new[] { "game.exe" }, reloaded.Advanced.EasyMouseFullscreenExcludedApps);
+        Assert.IsTrue(File.ReadAllText(path).Contains("\"Ctrl+Shift+R\"", StringComparison.Ordinal), "'+' must not be escaped");
+    }
+
+    [TestMethod]
+    public void HasCommentsHandlesByteOrderMarkAndPlainFiles()
+    {
+        string path = Path.Combine(dir, "bom.json");
+        File.WriteAllText(path, "{ /* c */ \"a\": 1 }", new System.Text.UTF8Encoding(true));
+        Assert.IsTrue(LiteConfig.HasComments(path));
+        File.WriteAllText(path, "{ \"a\": \"// not a comment\" }", new System.Text.UTF8Encoding(true));
+        Assert.IsFalse(LiteConfig.HasComments(path));
+    }
+
+    [TestMethod]
+    public void InvalidValuesStillParseForTheSettingsWindow()
+    {
+        string path = Write("{ \"securityKey\": \"short\", \"machines\": [\"a\",\"A\"] }");
+
+        var cfg = LiteConfig.TryParse(path, out string error);
+
+        Assert.IsNotNull(cfg, error);
+        var errors = cfg!.Validate(out _);
+        Assert.AreEqual(2, errors.Count, string.Join("; ", errors));
+        Assert.IsNull(LiteConfig.TryParse(Write("{ nope"), out error));
+        StringAssert.Contains(error, "not valid JSON");
+    }
+
+    [TestMethod]
     public void SettingsFacadeMapsConfigAndPersistsOnlyState()
     {
         string settingsFile = Write("""

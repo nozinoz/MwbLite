@@ -20,6 +20,104 @@ namespace MouseWithoutBorders.Lite
         private static FileSystemWatcher serviceSettingsWatcher;
         private static System.Threading.Timer reloadDebounce;
 
+        private static LiteSettingsForm settingsForm;
+
+        /// <summary>Opens the Settings window (as the interactive user, never as SYSTEM).</summary>
+        internal static void ShowSettings()
+        {
+            if (Common.RunOnLogonDesktop || Common.RunOnScrSaverDesktop)
+            {
+                return;
+            }
+
+            try
+            {
+                if (LitePaths.IsSystem)
+                {
+                    _ = Launch.CreateProcessInInputDesktopSession("\"" + LitePaths.ExePath + "\"", "--settings", "default", 1);
+                    return;
+                }
+
+                Common.DoSomethingInUIThread(() =>
+                {
+                    if (settingsForm != null && !settingsForm.IsDisposed)
+                    {
+                        settingsForm.Activate();
+                        return;
+                    }
+
+                    settingsForm = LiteSettingsForm.Create(LitePaths.UserSettingsFile, cfg =>
+                    {
+                        ReloadAndReport();
+                        AfterSettingsSaved(cfg);
+                    });
+                    settingsForm?.Show();
+                });
+            }
+            catch (Exception e)
+            {
+                Logger.Log(e);
+                Common.ShowToolTip("Cannot open Settings: " + e.Message, 5000, ToolTipIcon.Error);
+            }
+        }
+
+        /// <summary>"MwbLite.exe --settings": the Settings window as its own process (used by the SYSTEM tray).</summary>
+        internal static int RunSettingsProcess()
+        {
+            using var mutex = new System.Threading.Mutex(true, @"Local\MwbLite-Settings", out bool first);
+            if (!first)
+            {
+                return 0; // already open
+            }
+
+            var form = LiteSettingsForm.Create(LitePaths.UserSettingsFile, cfg =>
+            {
+                string installedExe = Path.Combine(LitePaths.InstallDir, LitePaths.AppName + ".exe");
+                LiteStartup.Sync(cfg.StartWithWindows, File.Exists(installedExe) ? installedExe : LitePaths.ExePath);
+                if (!AfterSettingsSaved(cfg))
+                {
+                    _ = MessageBox.Show("Settings saved. If MwbLite is running, choose Reload config in its tray menu.", "MwbLite Settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            });
+
+            if (form != null)
+            {
+                Application.Run(form);
+            }
+
+            return 0;
+        }
+
+        /// <summary>
+        /// Service-mode follow-up after a save: offer the one-time install, or push the new settings to the
+        /// service's protected copy (UAC). Returns true if it started either.
+        /// </summary>
+        private static bool AfterSettingsSaved(LiteConfig cfg)
+        {
+            if (!cfg.UseService)
+            {
+                return false;
+            }
+
+            if (!LiteServiceControl.IsInstalled())
+            {
+                if (MessageBox.Show(
+                    "Service mode needs a one-time install (administrator): MwbLite is copied to Program Files, the MwbLite.Service service and a firewall rule are added, and MwbLite restarts.\r\n\r\nInstall now?",
+                    "MwbLite Settings",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question) == DialogResult.Yes)
+                {
+                    _ = Process.Start(new ProcessStartInfo(LitePaths.ExePath, "--install") { UseShellExecute = false });
+                }
+
+                return true;
+            }
+
+            // The SYSTEM instances read %ProgramData%\MwbLite\settings.json; copying it needs a UAC prompt.
+            _ = System.Threading.Tasks.Task.Run(LiteCommands.ApplyConfig);
+            return true;
+        }
+
         internal static void OpenConfigFile()
         {
             if (Common.RunOnLogonDesktop || Common.RunOnScrSaverDesktop)
@@ -71,7 +169,7 @@ namespace MouseWithoutBorders.Lite
             ReloadAndReport();
         }
 
-        private static void ReloadAndReport()
+        internal static void ReloadAndReport()
         {
             if (Setting.Values.Reload(out var errors, out var warnings, out bool restartNeeded))
             {

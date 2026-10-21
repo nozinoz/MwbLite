@@ -5,6 +5,7 @@
 //                               copy settings.json for the service (one UAC prompt), then start it.
 //   MwbLite.exe --apply-config  copy your settings.json to the service's protected copy (UAC prompt).
 //   MwbLite.exe --uninstall     remove service, firewall rule, Program Files copy, service data.
+//   MwbLite.exe --settings      open the Settings window (edits %LOCALAPPDATA%\MwbLite\settings.json).
 //   MwbLite.exe --open-config   open %LOCALAPPDATA%\MwbLite\settings.json in Notepad.
 //   MwbLite.exe --service       service entry point (used by the Service Control Manager only).
 //
@@ -33,7 +34,8 @@ namespace MouseWithoutBorders.Lite
             "MwbLite.exe --install       install to Program Files + service + firewall rule (admin)\r\n" +
             "MwbLite.exe --apply-config  push settings.json to the service (admin)\r\n" +
             "MwbLite.exe --uninstall     remove everything --install added (admin)\r\n" +
-            "MwbLite.exe --open-config   open settings.json\r\n\r\n" +
+            "MwbLite.exe --settings      open the Settings window\r\n" +
+            "MwbLite.exe --open-config   open settings.json in Notepad\r\n\r\n" +
             "Config: " + LitePaths.UserSettingsFile;
 
         internal static int Run(string[] args)
@@ -49,6 +51,13 @@ namespace MouseWithoutBorders.Lite
                         LiteLog.Write("Service", "Starting: " + Environment.CommandLine);
                         MouseWithoutBordersService.Program.RunService(args);
                         return 0;
+
+                    case "--settings":
+                        LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");
+                        Application.EnableVisualStyles();
+                        _ = Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+                        Application.SetCompatibleTextRenderingDefault(false);
+                        return LiteTray.RunSettingsProcess();
 
                     case "--open-config":
                         LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");
@@ -132,7 +141,7 @@ namespace MouseWithoutBorders.Lite
             return 0;
         }
 
-        private static int ApplyConfig()
+        internal static int ApplyConfig()
         {
             string userSettings = LitePaths.UserSettingsFile;
             var cfg = LiteConfig.TryLoad(userSettings, out var errors, out _);

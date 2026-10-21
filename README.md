@@ -52,18 +52,19 @@ off in PowerToys): both use TCP ports 15100/15101.
 ### Option A: normal mode (no admin)
 
 Run `MwbLite.exe`. On first run it creates `%LOCALAPPDATA%\MwbLite\settings.json` with a random security key and
-shows a balloon. Then:
+shows a balloon. Then left-click the tray icon to open **Settings** (see [Settings window](#settings-window)):
 
-1. Right-click the tray icon and choose **Open config file**.
-2. Set the **same `securityKey`** and the **same `machines` list** on every PC.
-3. Right-click the tray icon and choose **Reload config**.
+1. On the first PC, press **Copy** next to the security key. On every other PC, paste that key.
+2. Enter the same computer names, in screen order, on every PC. **Add this PC** fills in the current computer.
+3. Press **Save & apply**. The change takes effect immediately.
 
 Windows Firewall will ask on first run whether to allow MwbLite. Allow **private networks**.
 
 ### Option B: installed, with lock screen and UAC prompt support (recommended)
 
-1. Set `"useService": true` and `"startWithWindows": true` in your settings.json.
-2. Run `MwbLite.exe --install` and approve the UAC prompt. This:
+1. In Settings, tick **Service mode** and **Start with Windows**, then press **Save & apply**. MwbLite offers the
+   one-time install. Alternatively, set `"useService": true` and `"startWithWindows": true` and run
+   `MwbLite.exe --install`. Approve the UAC prompt. The install:
    - copies both exes to `C:\Program Files\MwbLite\`;
    - registers the **MwbLite.Service** Windows service (demand start). It uses the same security descriptor as
      PowerToys, so you can start it without admin rights;
@@ -89,21 +90,50 @@ are kept.
 | `MwbLite.exe --install` | UAC | Install or update (see above). Safe to re-run. |
 | `MwbLite.exe --apply-config` | UAC | Copy your settings.json to the service's protected copy. |
 | `MwbLite.exe --uninstall` | UAC | Remove the service, firewall rule, Program Files copy, `%ProgramData%\MwbLite` and the Run entry. |
+| `MwbLite.exe --settings` | no | Open the Settings window. |
 | `MwbLite.exe --open-config` | no | Open your settings.json in Notepad. |
 | `MwbLite.exe --service` | — | Service entry point. The Service Control Manager uses this; don't run it by hand. |
 
 ### Tray menu
 
-- **Open config file.** Also what a left-click on the icon does.
-- **Reload config.**
+- **Settings…** Also what a left-click on the icon does. See [Settings window](#settings-window).
+- **Open config file.** Opens settings.json in Notepad.
+- **Reload config.** Re-reads settings.json after you edit it by hand.
 - **Exit.**
 - **Machines.** Below Exit, upstream's list of connected machines (click one to switch to it).
 
+### Settings window
+
+![MwbLite Settings](docs/settings-window.png)
+
+Left-click the tray icon, or choose **Settings…**, to edit settings.json without touching JSON.
+
+- **Pairing.** Shows this PC's name. The security key has **Show**, **Generate** (a new random key) and
+  **Copy** buttons.
+- **Machines and layout.** Four name boxes in screen order. They regroup as a 2×2 grid when you choose **Two
+  rows**.
+- **Options.** Clipboard, file transfer, start with Windows, service mode.
+- **Show advanced settings.** Port, Easy Mouse, hotkeys, name-to-IP mappings and the less common switches.
+- **Save & apply** validates first, using the same checks as Reload config. If something is wrong, the window
+  stays open and the problem is shown in red. Otherwise it writes settings.json and applies it:
+  - **Normal mode:** applied immediately.
+  - **Service mode:** a UAC prompt copies it to the service's protected copy.
+  - **Service mode turned on but not installed yet:** the window offers the one-time install.
+- **Saving rewrites settings.json.** Comments are removed (you're asked first), and the previous file is kept as
+  `settings.json.bak`. Values the window doesn't show (e.g. `easyMouseFullscreenExcludedApps`) are kept.
+- **Open JSON…** opens the file in Notepad for anything else.
+- **It runs as you.** In service mode the tray belongs to a SYSTEM process, so the window opens as a separate
+  `MwbLite.exe --settings` process with your token, never as SYSTEM.
 ## Configuration: `%LOCALAPPDATA%\MwbLite\settings.json`
 
-The file is JSON. `//` comments and trailing commas are allowed. MwbLite **never rewrites this file**: it only
-creates it when it's missing. Values MWB changes while running (machine IDs, learned machine pool, last cursor
-position) go to `state.json` next to it.
+The file is JSON. `//` comments and trailing commas are allowed. The MWB engine **never writes this file**. Only
+two things do:
+- MwbLite creates it when it's missing.
+- The Settings window rewrites it when you press **Save & apply**, keeping the previous file as
+  `settings.json.bak`.
+
+Values MWB changes while running (machine IDs, learned machine pool, last cursor position) go to `state.json`
+next to it.
 
 ```jsonc
 {
@@ -241,8 +271,8 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
   ACL-restricted to SYSTEM and Administrators, and changes require UAC approval (`--apply-config`).
   - **Where this differs from upstream:** PowerToys kept the service key DPAPI-encrypted inside the user's
     settings file. MwbLite keeps it as plain text in a folder only admins can access.
-- **No editor runs as SYSTEM.** The SYSTEM tray's "Open config file" and "Reload config" start
-  `MwbLite.exe --open-config` / `--apply-config` with **your** token.
+- **No editor or settings window runs as SYSTEM.** The SYSTEM tray's "Settings…", "Open config file" and "Reload
+  config" start `MwbLite.exe --settings` / `--open-config` / `--apply-config` with **your** token.
 - **Install location:** the service binary lives in `C:\Program Files\MwbLite` (admin-only write), never in a
   user-writable folder.
 - **Firewall:** the rule allows only `MwbLite.exe` on the two MWB ports, from the local subnet. Upstream allowed
@@ -252,13 +282,13 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
 
 ## Known limitations
 
-- **No settings GUI.** Pairing and layout are done by editing settings.json. The classic MWB settings form and
-  wizard, the screen-capture menu items, "About" and "Generate log" are hidden.
+- **Simple settings UI only.** The Settings window replaces the classic MWB settings form and setup wizard. The
+  screen-capture menu items, "About" and "Generate log" are hidden.
 - **Up to 4 machines** (MWB limit). Keep `machines` and `securityKey` identical on all PCs. MWB syncs layout
   changes between connected PCs at runtime (kept in memory until Reload or restart), so differing lists cause the
   layout to flip-flop.
 - **Some runtime changes are lost on restart.** These include Easy Mouse toggled by hotkey and a layout received
-  from a peer, because settings.json is never written by the app.
+  from a peer, because the engine never writes settings.json.
 - **Service mode starts at logon.** The service is demand-start (as in PowerToys) and is started by the Run entry
   when you log on. Lock screen and UAC control therefore work after your first logon, not at the cold-boot login
   screen.

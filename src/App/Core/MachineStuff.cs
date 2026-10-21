@@ -849,8 +849,8 @@ internal static class MachineStuff
         }
 
         // MwbLite: the classic settings form / setup wizard is replaced by settings.json; every path
-        // that used to open it (tray click, key problems) opens the config file instead.
-        Lite.LiteTray.OpenConfigFile();
+        // that used to open it (tray click, key problems) opens the MwbLite Settings window instead.
+        Lite.LiteTray.ShowSettings();
     }
 
     private static string[] mcMatrix;

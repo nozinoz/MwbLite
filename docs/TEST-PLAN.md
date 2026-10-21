@@ -24,7 +24,7 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 |---|---|---|---|
 | 1.1 | Double-click `MwbLite.exe`. If SmartScreen warns, choose "More info > Run anyway". | Tray icon appears (it may be in the `^` overflow). A balloon says settings.json was created. | |
 | 1.2 | Hover the tray icon. | Tooltip shows `[THISPC][][][]`. | |
-| 1.3 | Left-click the icon (or right-click > **Open config file**). | Notepad opens `%LOCALAPPDATA%\MwbLite\settings.json` with a random `securityKey`. | |
+| 1.3 | Left-click the icon (or right-click > **Settings…**). | The **MwbLite Settings** window opens. It shows this PC's name, a random (hidden) security key, and this PC in machine slot 1. Right-click > **Open config file** opens the same settings in Notepad. | |
 | 1.4 | Check `%LOCALAPPDATA%\MwbLite\logs\mwblite.log`. | Contains `Keyboard/Mouse hooks installed`, `TCP listening on port: 15100` and `15101`, and `Helper process started`. | |
 | 1.5 | Task Manager > Details. | `MwbLite.exe` and `MwbLite.Helper.exe` are running. No PowerToys processes are needed. | |
 
@@ -32,13 +32,13 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 
 | # | Step | Expected | Result |
 |---|---|---|---|
-| 2.1 | On **A**, copy the `securityKey` value. Set `machines` to the layout as you sit, e.g. `["LAPTOP1", "MINIPC"]` (laptop to the left). Save. | — | |
-| 2.2 | On **A**, right-click the tray icon > **Reload config**. | Balloon: "Configuration reloaded." | |
-| 2.3 | On **B**, paste the **same** `securityKey` and the **same** `machines` list. Save, then **Reload config**. | Balloon: "Configuration reloaded." | |
+| 2.1 | On **A**, open **Settings**, press **Copy** next to the key, and enter the machines as you sit, e.g. `LAPTOP1`, `MINIPC` (laptop to the left). | — | |
+| 2.2 | On **A**, press **Save & apply**. | The window closes; balloon: "Configuration reloaded." | |
+| 2.3 | On **B**, open **Settings**, paste the **same** key (MWB is not connected yet, so type or transfer it another way) and enter the **same** machine list. Press **Save & apply**. | Balloon: "Configuration reloaded." | |
 | 2.4 | If a Windows Firewall prompt appeared on either machine at first start, allow **Private** networks. In normal mode without `--install`, you may need to restart MwbLite after allowing. | — | |
 | 2.5 | Within about 10 s, hover the tray icon on A. Right-click it. | The menu lists both machine names under Exit (the connected machines). | |
-| 2.6 | **Negative test:** on B, change one character of the key and reload. | A and B stop working together (B can't be reached from A). The logs show connection or handshake errors. | |
-| 2.7 | Restore the correct key on B and reload. | They reconnect. | |
+| 2.6 | **Negative test:** in Settings on B, change one character of the key and save. | A and B stop working together (B can't be reached from A). The logs show connection or handshake errors. | |
+| 2.7 | Restore the correct key on B and save. Also try a 10-character key: Save should refuse it and show a red message, keeping the window open. | They reconnect. Short key rejected. | |
 
 ## 3. Cursor crossing the screen edge
 
@@ -48,7 +48,7 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 3.2 | Move back across the opposite edge of B. | Cursor returns to A. | |
 | 3.3 | Press **Ctrl+Alt+F2**, then **Ctrl+Alt+F1** (positions in `machines`). | Control jumps to the 2nd machine, then back to the 1st. | |
 | 3.4 | Press **Win+Ctrl+Alt+E** (toggle Easy Mouse), then try to cross the edge. | Balloon shows Easy Mouse disabled, and the edge no longer switches. Press it again to re-enable. | |
-| 3.5 | Edit `layout.wrapMouse` to `false` on both machines and reload. Move off the far edge of the last machine. | Cursor no longer wraps. | |
+| 3.5 | In Settings > Machines, untick **Wrap the cursor around the outer edges** on both machines and save. Move off the far edge of the last machine. | Cursor no longer wraps. | |
 
 ## 4. Clipboard
 
@@ -59,7 +59,7 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 4.3 | Copy a screenshot (Win+Shift+S) on A and paste into Paint on B. | Image is pasted. | |
 | 4.4 | **File copy:** on A, select a file of 1–50 MB in Explorer and press Ctrl+C. Move to B, click the desktop, press Ctrl+V. | File arrives in `Desktop\MouseWithoutBorders\` on B. | |
 | 4.5 | **Drag and drop:** drag a file from A's Explorer across the edge and drop it on B's desktop. | File arrives on B. | |
-| 4.6 | Set `"shareClipboard": false` on A and reload. Repeat 4.1. | Text is **not** transferred. Set it back to `true`. | |
+| 4.6 | In Settings on A, untick **Share the clipboard** and save. Repeat 4.1. | Text is **not** transferred. Tick it again. | |
 
 ## 5. One machine sleeps
 
@@ -83,13 +83,13 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 
 | # | Step | Expected | Result |
 |---|---|---|---|
-| 7.1 | Set `"useService": true` and `"startWithWindows": true`. Run `MwbLite.exe --install` from the dist folder and approve UAC. | Message: "MwbLite installed to C:\Program Files\MwbLite and started." | |
+| 7.1 | In Settings, tick **Service mode** and **Start with Windows**, then press **Save & apply**. Answer **Yes** to "Install now?" and approve UAC. (Or run `MwbLite.exe --install` from the dist folder.) | Message: "MwbLite installed to C:\Program Files\MwbLite and started." | |
 | 7.2 | `sc qc MwbLite.Service` | `BINARY_PATH_NAME` is `"C:\Program Files\MwbLite\MwbLite.exe" --service`. | |
 | 7.3 | `netsh advfirewall firewall show rule name=MwbLite` | Inbound, TCP 15100,15101, RemoteIP LocalSubnet. | |
 | 7.4 | Task Manager > Details, User name column. | Two `MwbLite.exe` running as **SYSTEM**, plus `MwbLite.Helper.exe` running as you. | |
 | 7.5 | Lock B (Win+L). From A, cross to B and type B's PIN or password on the lock screen. | You can unlock B from A's keyboard. | |
 | 7.6 | On B, open something that triggers UAC (e.g. Services > right-click > Run as admin). Control B from A. | You can click Yes/No on B's UAC prompt from A. | |
-| 7.7 | Edit settings.json on B (e.g. `showClipboardAndNetworkStatusMessages`), then tray > **Reload config**. | A UAC prompt appears ("--apply-config"). After approving, the SYSTEM instances reload. | |
+| 7.7 | On B, open **Settings** from the tray (now owned by the SYSTEM instance), change an option (e.g. Advanced > **Show clipboard/network messages**), and save. | The window opens as you (not SYSTEM). A UAC prompt appears ("--apply-config"). After approving, the SYSTEM instances reload. | |
 | 7.8 | Reboot B and log in. | MwbLite starts automatically; control from A works after logon. | |
 | 7.9 | Lock and unlock several times; sleep and wake once. | Still connected each time. | |
 

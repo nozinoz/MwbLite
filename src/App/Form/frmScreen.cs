@@ -106,11 +106,14 @@ namespace MouseWithoutBorders
                 item.Visible = false;
             }
 
+            var settings = new ToolStripMenuItem("&Settings…", null, (s, e) => Lite.LiteTray.ShowSettings());
+            settings.Font = new Font(settings.Font, FontStyle.Bold); // also what a left-click on the icon opens
             var openConfig = new ToolStripMenuItem("&Open config file", null, (s, e) => Lite.LiteTray.OpenConfigFile());
             var reloadConfig = new ToolStripMenuItem("&Reload config", null, (s, e) => Lite.LiteTray.ReloadConfig());
-            MainMenu.Items.Insert(0, openConfig);
-            MainMenu.Items.Insert(1, reloadConfig);
-            MainMenu.Items.Insert(2, new ToolStripSeparator());
+            MainMenu.Items.Insert(0, settings);
+            MainMenu.Items.Insert(1, openConfig);
+            MainMenu.Items.Insert(2, reloadConfig);
+            MainMenu.Items.Insert(3, new ToolStripSeparator());
         }
 
         private void FrmScreen_FormClosing(object sender, FormClosingEventArgs e)

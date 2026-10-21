@@ -153,8 +153,22 @@ namespace MouseWithoutBorders.Lite
         /// <summary>Loads and validates a config file. Returns null (and the reason) if it is unusable.</summary>
         internal static LiteConfig TryLoad(string path, out List<string> errors, out List<string> warnings)
         {
-            errors = new List<string>();
             warnings = new List<string>();
+            var cfg = TryParse(path, out string parseError);
+            if (cfg == null)
+            {
+                errors = new List<string> { parseError };
+                return null;
+            }
+
+            errors = cfg.Validate(out warnings);
+            return errors.Count == 0 ? cfg : null;
+        }
+
+        /// <summary>Reads and normalizes a config file without validating it (the Settings window shows invalid values so they can be fixed).</summary>
+        internal static LiteConfig TryParse(string path, out string error)
+        {
+            error = null;
             LiteConfig cfg;
 
             try
@@ -164,40 +178,54 @@ namespace MouseWithoutBorders.Lite
             }
             catch (JsonException e)
             {
-                errors.Add($"{Path.GetFileName(path)} is not valid JSON: {e.Message}");
+                error = $"{Path.GetFileName(path)} is not valid JSON: {e.Message}";
                 return null;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
-                errors.Add($"Cannot read {path}: {e.Message}");
+                error = $"Cannot read {path}: {e.Message}";
                 return null;
             }
 
             if (cfg == null)
             {
-                errors.Add($"{Path.GetFileName(path)} is empty.");
+                error = $"{Path.GetFileName(path)} is empty.";
                 return null;
             }
 
-            cfg.Layout ??= new LayoutConfig();
-            cfg.Advanced ??= new AdvancedConfig();
-            cfg.Advanced.Hotkeys ??= new HotkeysConfig();
-            cfg.Advanced.Name2Ip ??= new List<string>();
-            cfg.Advanced.EasyMouseFullscreenExcludedApps ??= new List<string>();
-            cfg.Machines = (cfg.Machines ?? new List<string>()).Select(NormalizeName).ToList();
-            cfg.SecurityKey = NormalizeKey(cfg.SecurityKey);
+            cfg.Normalize();
+            return cfg;
+        }
 
-            if (!Encryption.IsKeyValid(cfg.SecurityKey, out string keyError))
+        /// <summary>Fills missing sections and canonicalizes names and the key.</summary>
+        internal void Normalize()
+        {
+            Layout ??= new LayoutConfig();
+            Advanced ??= new AdvancedConfig();
+            Advanced.Hotkeys ??= new HotkeysConfig();
+            Advanced.Name2Ip ??= new List<string>();
+            Advanced.EasyMouseFullscreenExcludedApps ??= new List<string>();
+            Machines = (Machines ?? new List<string>()).Select(NormalizeName).ToList();
+            SecurityKey = NormalizeKey(SecurityKey);
+        }
+
+        /// <summary>Returns the problems that make this config unusable (empty if it is valid).</summary>
+        internal List<string> Validate(out List<string> warnings)
+        {
+            var errors = new List<string>();
+            warnings = new List<string>();
+
+            if (!Encryption.IsKeyValid(SecurityKey, out string keyError))
             {
                 errors.Add("securityKey: " + keyError);
             }
 
-            if (cfg.Machines.Count > MaxMachines)
+            if (Machines.Count > MaxMachines)
             {
-                errors.Add($"machines: at most {MaxMachines} entries are supported (found {cfg.Machines.Count}).");
+                errors.Add($"machines: at most {MaxMachines} entries are supported (found {Machines.Count}).");
             }
 
-            var named = cfg.Machines.Where(m => m.Length > 0).ToList();
+            var named = Machines.Where(m => m.Length > 0).ToList();
             if (named.Count != named.Distinct(StringComparer.OrdinalIgnoreCase).Count())
             {
                 errors.Add("machines: a machine name is listed twice.");
@@ -213,12 +241,12 @@ namespace MouseWithoutBorders.Lite
                 warnings.Add($"machines does not include this computer ({NormalizeName(Environment.MachineName)}); MWB will place it in the first empty slot.");
             }
 
-            if (cfg.Advanced.TcpPort is < 1024 or > 65534)
+            if (Advanced.TcpPort is < 1024 or > 65534)
             {
                 errors.Add("advanced.tcpPort must be between 1024 and 65534 (MWB also uses tcpPort+1).");
             }
 
-            foreach (var (name, value) in cfg.HotkeyStrings())
+            foreach (var (name, value) in HotkeyStrings())
             {
                 if (!TryParseHotkey(value, out _))
                 {
@@ -226,12 +254,12 @@ namespace MouseWithoutBorders.Lite
                 }
             }
 
-            if (cfg.SwitchMachineHotkeyCode() == 0 && !string.Equals(cfg.Advanced.Hotkeys.SwitchMachine?.Trim(), "disabled", StringComparison.OrdinalIgnoreCase))
+            if (SwitchMachineHotkeyCode() == 0 && !string.Equals(Advanced.Hotkeys.SwitchMachine?.Trim(), "disabled", StringComparison.OrdinalIgnoreCase))
             {
                 errors.Add("advanced.hotkeys.switchMachine must be \"F1\", \"1\" or \"disabled\".");
             }
 
-            foreach (string entry in cfg.Advanced.Name2Ip)
+            foreach (string entry in Advanced.Name2Ip)
             {
                 string[] parts = (entry ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length < 2 || !System.Net.IPAddress.TryParse(parts[1], out _))
@@ -240,7 +268,51 @@ namespace MouseWithoutBorders.Lite
                 }
             }
 
-            return errors.Count == 0 ? cfg : null;
+            return errors;
+        }
+
+        /// <summary>
+        /// Writes this config (used by the Settings window only; the engine never writes settings.json).
+        /// The previous file is kept as settings.json.bak; the write is atomic.
+        /// </summary>
+        internal void Save(string path)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            if (File.Exists(path))
+            {
+                File.Copy(path, path + ".bak", overwrite: true);
+            }
+
+            string tmp = path + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(this, JsonOptions), new UTF8Encoding(false));
+            File.Move(tmp, path, overwrite: true);
+        }
+
+        /// <summary>True if the file contains // or /* */ comments (they are lost when the Settings window saves).</summary>
+        internal static bool HasComments(string path)
+        {
+            try
+            {
+                ReadOnlySpan<byte> bytes = File.ReadAllBytes(path);
+                if (bytes.StartsWith(Encoding.UTF8.Preamble))
+                {
+                    bytes = bytes[Encoding.UTF8.Preamble.Length..];
+                }
+
+                var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { CommentHandling = JsonCommentHandling.Allow, AllowTrailingCommas = true });
+                while (reader.Read())
+                {
+                    if (reader.TokenType == JsonTokenType.Comment)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+            {
+            }
+
+            return false;
         }
 
         /// <summary>Writes a default config if none exists. Never overwrites an existing file.</summary>
