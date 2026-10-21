@@ -124,6 +124,11 @@ $folder = $common + @('-p:PublishSingleFile=false', '-o', $payload)
 Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\MwbLite.csproj')) + $folder)
 Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\Helper\MwbLite.Helper.csproj')) + $folder)
 
+# Licence and docs ship in the install folder too (MIT requires the licence to travel with the software).
+foreach ($doc in 'LICENSE', 'NOTICE.md', 'README.md') {
+    Copy-Item (Join-Path $root $doc) $payload
+}
+
 # --- 4. Optional code signing -----------------------------------------------------------------
 $signToolArgsResolved = $null
 if ($CertThumbprint -or $SignToolArgs) {
