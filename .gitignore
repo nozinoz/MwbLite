@@ -1,0 +1,9 @@
+# upstream reference clone (re-create with: see UPSTREAM.md)
+/upstream/
+# portable SDK, build outputs
+/.dotnet/
+/dist/
+bin/
+obj/
+*.user
+.vs/
