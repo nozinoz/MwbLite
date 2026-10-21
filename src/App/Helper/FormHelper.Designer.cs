@@ -54,7 +54,7 @@
             this.ShowIcon = false;
             this.ShowInTaskbar = false;
             this.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
-            this.Text = "Mouse without Borders Helper";
+            this.Text = "MwbLite Helper"; // MwbLite: must match Helper.HELPER_FORM_TEXT in the main exe
             this.TopMost = true;
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.FormHelper_FormClosing);
             this.FormClosed += new System.Windows.Forms.FormClosedEventHandler(this.FormHelper_FormClosed);

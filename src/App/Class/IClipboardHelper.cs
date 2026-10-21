@@ -164,7 +164,7 @@ namespace MouseWithoutBorders
 
     internal sealed class IpcHelper
     {
-        private const string ChannelName = "MouseWithoutBorders";
+        private const string ChannelName = "MwbLite"; // MwbLite: was "MouseWithoutBorders" (pipe name shared with PowerToys MWB)
         private const string RemoteObjectName = "ClipboardHelper";
 
 #if !MM_HELPER

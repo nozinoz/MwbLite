@@ -31,6 +31,7 @@ namespace MouseWithoutBorders.Lite
             ReadCommentHandling = JsonCommentHandling.Skip,
             AllowTrailingCommas = true,
             WriteIndented = true,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // keep "Win+Ctrl" readable in a hand-edited file
             Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
         };
 
@@ -50,7 +51,7 @@ namespace MouseWithoutBorders.Lite
 
         public bool TransferFile { get; set; } = true;
 
-        public bool StartWithWindows { get; set; } = true;
+        public bool StartWithWindows { get; set; }
 
         /// <summary>Run through the MwbLite.Service Windows service (lock screen / UAC prompt support). Needs "--install".</summary>
         public bool UseService { get; set; }
