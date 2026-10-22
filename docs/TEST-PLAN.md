@@ -32,18 +32,18 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 
 | # | Step | Expected | Result |
 |---|---|---|---|
-| 2.1 | On **A**, open **Settings**, tick **Start with Windows**, press **Save & apply**. | Balloon: "Configuration reloaded." | |
+| 2.1 | On **A**, open **Settings**, turn on **Start with Windows** (Connection), press **Save**. | Balloon: "Configuration reloaded." | |
 | 2.2 | On **A**: Settings > **Add a PC…** | A window says it is waiting for a PC to join. | |
 | 2.3 | On **B**: Settings > **Join…** | Within a few seconds **A**'s name appears in the list. (If not, type A's computer name in the box below the list.) | |
 | 2.4 | On **B**, select A and press **Join**. | Both windows show the **same** 6-digit code. A's window says "B wants to join". | |
-| 2.5 | Press **Codes match** on **A**, then on **B**. | Both windows report success; B's Settings now shows A's key (Show advanced settings > Security key > Show, to compare) and the list `A, B`. A's list shows `A, B`. | |
+| 2.5 | Press **Codes match** on **A**, then on **B**. | Both windows report success; B's Settings now shows A's key (Advanced > Security key > Show, to compare) and the list `A, B`. A's list shows `A, B`. | |
 | 2.6 | Within about 10 s, right-click the tray icon on A. | The menu lists both machine names under Exit (the connected machines). | |
 | 2.7 | **Cancel test:** repeat 2.2–2.4 and press **Cancel** on B at the code step. | A's window says pairing was cancelled on the other PC; nothing changes on either PC. | |
 | 2.8 | **Different-code test (optional):** start Add a PC on A and Join from B, but press Codes match on only one PC and Cancel on the other. | No settings change on either PC. | |
 | 2.9 | If a Windows Firewall prompt appeared on either machine, allow **Private** networks. (With Setup, the rules are added automatically.) | — | |
-| 2.10 | **Wrong key:** in Settings on B, open Show advanced settings, change one character of the security key and save. | A and B stop working together (B can't be reached from A). The logs show connection or handshake errors. | |
+| 2.10 | **Wrong key:** in Settings on B, open Advanced, change one character of the security key and save. | A and B stop working together (B can't be reached from A). The logs show connection or handshake errors. | |
 | 2.11 | Pair again with a code (2.2–2.5). Also try typing a 10-character key in Settings and saving. | They reconnect. The short key is refused with a red message. | |
-| 2.12 | **Arrange:** on A, drag B's tile onto A's tile under Machines and layout (order becomes `B, A`) and press Save & apply. Then exit and restart MwbLite on B. | B's Settings shows the new order, both before and after the restart. | |
+| 2.12 | **Arrange:** on A, drag B's tile onto A's tile on the PCs page (order becomes `B, A`) and press Save. Then exit and restart MwbLite on B. | B's Settings shows the new order, both before and after the restart. | |
 ## 3. Cursor crossing the screen edge
 
 | # | Step | Expected | Result |
@@ -121,7 +121,7 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 
 | # | Step | Expected | Result |
 |---|---|---|---|
-| 7.1 | In Settings, tick **Service mode** and **Start with Windows**, press **Save & apply**, and approve the UAC prompt. Then Exit MwbLite from the tray and start it again from the Start menu. | No errors. | |
+| 7.1 | In Settings > Connection, turn on **Control the lock screen and UAC prompts** and **Start with Windows**, press **Save**, and approve the UAC prompt. Then Exit MwbLite from the tray and start it again from the Start menu. | No errors. | |
 | 7.2 | `sc qc MwbLite.Service` | `BINARY_PATH_NAME` is `"C:\Program Files\MwbLite\MwbLite.exe" --service`, `START_TYPE` is `DEMAND_START`. | |
 | 7.3 | `netsh advfirewall firewall show rule name=MwbLite` | Inbound, Allow, Protocol TCP, RemoteIP LocalSubnet, Program `C:\Program Files\MwbLite\MwbLite.exe`. | |
 | 7.4 | Task Manager > Details, User name column. | Two `MwbLite.exe` running as **SYSTEM**, plus `MwbLite.Helper.exe` running as you. | |
@@ -137,6 +137,20 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 |---|---|---|---|
 | 8.1 | Pair C with A: Settings > Add a PC… on A, Join… on C, confirm the code on both. | C joins; within about 10 s **B**'s Settings also lists A, B, C (B was not touched). The tray menu on A lists all three. Restart B: the list stays. | |
 | 8.2 | Cross A → B → C and back. Copy and paste text from C to A. | Works. | |
+
+## 8b. Look and feel (0.7 and later)
+
+| # | Step | Expected | Result |
+|---|---|---|---|
+| 8b.1 | Run `MwbLite-Setup-<version>.exe`. | Blue banner with the MwbLite logo; Install page with a "read the licence terms" link (opens the licence), "I agree" box (Install stays disabled until ticked) and "Start MwbLite when I sign in" (ticked). Progress page, then "MwbLite is ready" with **Open MwbLite**. | |
+| 8b.2 | After installing with the box ticked: `reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v MwbLite` | The entry exists, and Settings > Connection shows **Start with Windows** on. | |
+| 8b.3 | Tray icon with all PCs connected, then turn one PC's Wi-Fi off, then back on. | Green dot → (about 20 s) red dot → amber while reconnecting → green. Hover text matches. | |
+| 8b.4 | Windows Settings > Personalisation > Colours: switch between Light and Dark. | The tray glyph changes between black and white within about 30 s. Settings opened afterwards follows the mode. | |
+| 8b.5 | Open Settings. Visit each page. | Windows 11 look: sidebar with a highlight pill, cards, switches. The PCs page shows each PC's live state on its tile and in the status list. | |
+| 8b.6 | On the PCs page: arrow keys, Ctrl+arrow, F2 (type a name, Enter), Delete, drag a tile. | Selection moves, tiles move and swap, rename and remove work; nothing saves until **Save**. | |
+| 8b.7 | Change something and close the window. | "Save your changes?" Yes saves, No discards, Cancel keeps the window open. | |
+| 8b.8 | In normal mode (no service), change **Wrap the cursor** and Save. | The running MwbLite applies it within a second ("Configuration reloaded" balloon); no Reload needed. | |
+| 8b.9 | Display scaling 150% (Windows Settings > Display), then open Settings and copy a large file. | Settings, the tray icon and the progress window are sharp, not blurry. | |
 
 ## 9. Uninstall (optional, if you want to verify clean removal)
 

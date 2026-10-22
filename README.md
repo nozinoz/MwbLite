@@ -40,6 +40,13 @@ Output in `dist\`:
 | `portable\MwbLite.exe`, `portable\MwbLite.Helper.exe` | ~177 MB each | Run without installing (see [Portable use](#portable-use-no-installer)). |
 | `SHA256SUMS.txt` | | Hashes of all of the above. |
 
+Artwork and screenshots are generated from code, so they stay consistent:
+
+- `tools\make-art.ps1` regenerates the app icon (`src\App\Logo.ico`) and Setup's images (`installer\Assets`)
+  from `src/App/Lite/Ui/LiteArt.cs`. The outputs are committed; run it only after changing the artwork.
+- `MwbLite.exe --render-ui <folder>` renders every Settings page, the pairing window and the progress window, in
+  light and dark mode, to PNG files (used for the images in this README).
+
 The build keeps everything inside the repo folder:
 
 - NuGet packages go to `.nuget\` and come from nuget.org only.
@@ -62,8 +69,9 @@ built, MwbLite uses about 27 MB + 15 MB of private memory, compared with about 3
 
 ### With Setup (recommended)
 
-Run `MwbLite-Setup-<version>.exe` on each PC: accept the licence, press **Install**, approve the UAC prompt,
-then **Launch**. Setup:
+Run `MwbLite-Setup-<version>.exe` on each PC. Tick **I agree to the licence terms** (the link opens them), leave
+**Start MwbLite when I sign in** ticked if you want that, press **Install**, approve the UAC prompt, then **Open
+MwbLite**. Setup:
 
 - installs Microsoft's **.NET 10 Desktop Runtime** if the PC doesn't have a recent enough one (needs internet
   the first time);
@@ -73,6 +81,8 @@ then **Launch**. Setup:
 - registers the **MwbLite.Service** Windows service (demand start; local users may start and stop it), used for
   lock screen and UAC prompt control;
 - adds inbound Windows Firewall rules for `MwbLite.exe`, from the **local subnet** only: TCP (MWB and pairing) and UDP 15102 (finding PCs for pairing);
+- turns on **Start with Windows** for you if the box was ticked (from the command line: `StartWithWindows=0` to
+  leave it off);
 - closes running copies of MwbLite first, so re-running a newer Setup **upgrades in place** and keeps your
   settings.
 
@@ -85,7 +95,7 @@ MwbLite starts in the tray. On first run it creates `%LOCALAPPDATA%\MwbLite\sett
 security key and shows a balloon. Left-click the tray icon to open **Settings** (see
 [Settings window](#settings-window)).
 
-**First PC** (e.g. the mini PC): tick **Start with Windows** and press **Save & apply**. Its random key is the
+**First PC** (e.g. the mini PC): turn on **Start with Windows** (Connection page) and press **Save**. Its random key is the
 one every PC will use.
 
 **Each other PC**, one at a time, with both PCs on the same network:
@@ -99,7 +109,7 @@ one every PC will use.
 
 The new PC receives the security key, the machine list (with itself added), the layout and the port. Both PCs
 save and apply them at once, and any PCs already connected pick up the new layout automatically. Then tick
-**Start with Windows** on the new PC too. Drag the tiles under **Machines and layout** on any PC to match your desk; the others
+**Start with Windows** on the new PC too. Drag the tiles on the **PCs** page on any PC to match your desk; the others
 follow.
 
 You can still do it by hand instead: **Copy** the key from one PC, paste it on the others, and enter the same
@@ -107,7 +117,7 @@ machine names everywhere. See [How pairing works](#how-pairing-works).
 
 ### Lock screen and UAC prompts (service mode)
 
-1. In Settings, tick **Service mode**, press **Save & apply**, and approve the UAC prompt. That copies your
+1. In Settings > Connection, turn on **Control the lock screen and UAC prompts**, press **Save**, and approve the UAC prompt. That copies your
    settings to `%ProgramData%\MwbLite`, a folder only SYSTEM and Administrators can read (see
    [Security notes](#security-notes)).
 2. Exit MwbLite from the tray and start it again from the Start menu (or sign out and back in).
@@ -149,49 +159,63 @@ commands do nothing on a PC where Setup installed MwbLite.
 - **Your PCs.** Below Exit, every PC in the layout with its state: *This PC*, *Connected*, *Connecting…*, *Not
   connected* or *Security key doesn't match*. Click a connected PC to move the mouse and keyboard there.
 
-Hover over the icon for a summary ("MwbLite – 2 of 3 PCs connected", one line per PC, or the file being copied
-and how far it has got). An **amber dot** on the icon means a PC in the layout isn't connected. If a PC is
-rejected because its security key is different, a notification says so once.
+The icon is two screens, drawn white or black to match your taskbar, with a **status dot**:
+
+| Dot | Meaning |
+|---|---|
+| green | every PC in the layout is connected |
+| amber | connecting… |
+| red | a PC is offline, has a different security key, or runs an older version |
+| none | no other PCs set up yet |
+
+A small blue dot at the top left means a clipboard or file copy is under way, and a red outline means "control all
+PCs" mode is on. Hover over the icon for a summary ("MwbLite – 2 of 3 PCs connected", one line per PC, or the file
+being copied and how far it has got). If a PC is rejected because its security key is different, or because it
+runs an older version, a notification says so once.
+
+![Tray icons](docs/tray-icons.png)
 
 ### Settings window
 
 ![MwbLite Settings](docs/settings-window.png)
 
-Left-click the tray icon, or choose **Settings…**, to edit settings.json without touching JSON.
+Left-click the tray icon, or choose **Settings…**. The window looks and works like Windows 11 Settings: pages in a
+sidebar, cards and switches, and light or dark mode following Windows (it uses WPF's Fluent theme from .NET).
 
-- **Pairing.** Shows this PC's name, with **Add a PC…** / **Join…** to pair with a code (see
-  [First-time setup](#first-time-setup-pair-with-a-code)).
-- **Security key** (under **Show advanced settings**). It's set by pairing, so you don't need to type it. **Show**
-  and **Copy** are there if you want them. **Reset pairing…** makes a new key: this PC then stops working with the
-  others until they're paired again (a way to remove a PC from the group).
-- **Machines and layout.** Your PCs as tiles in MWB's 4 slots. **Drag a PC** onto another slot to move it there;
-  it swaps with whatever is in that slot. **One row** places them left to right; **Two rows (2 × 2)** turns the
-  slots into a grid (`[1][2]` over `[3][4]`) for a PC above or below another.
+- **PCs.** Your PCs as tiles in MWB's 4 slots, each with its live state (green Connected, amber Connecting, red
+  otherwise), plus a status list. **Drag a PC** onto another slot to move it there; it swaps with whatever is in
+  that slot. **One row** places them left to right; **Two rows (2 × 2)** turns the slots into a grid (`[1][2]`
+  over `[3][4]`) for a PC above or below another. **Wrap the cursor** and **Add this PC** are here too.
   - Double-click a tile or an empty slot to rename or add a PC; press Delete to remove one. The right-click menu
     does the same.
   - Keyboard: the arrow keys select a slot, Ctrl+arrows move the selected PC, and F2 renames.
   - This PC is highlighted. Save, and the other connected PCs take the new arrangement and save it too.
-
-  ![Two rows](docs/layout-grid.png)
-- **Options.** Clipboard, file transfer, the file copy progress window, start with Windows, service mode.
-- **Check connection…** runs a quick check and explains each problem in plain words (see
+- **Pairing.** **Add a PC…** / **Join…** to pair with a code (see
+  [First-time setup](#first-time-setup-pair-with-a-code)).
+- **Clipboard & files.** Clipboard, file transfer and the copy progress window.
+- **Connection.** Start with Windows, service mode, and **Check connection** with its results on the page (see
   [Check connection](#check-connection)).
-- **Show advanced settings.** Port, Easy Mouse, hotkeys, name-to-IP mappings and the less common switches.
-- **Save & apply** validates first, using the same checks as Reload config. If something is wrong, the window
-  stays open and the problem is shown in red. Otherwise it writes settings.json and applies it:
-  - **Normal mode:** applied immediately.
+- **Advanced.** The **security key** (set by pairing; **Show**, **Copy** and **Reset pairing…**, which makes a new
+  key so this PC stops working with the others until they're paired again), port, Easy Mouse, hotkeys,
+  name-to-IP mappings, the less common switches, **Allow older versions**, and **Open in Notepad**.
+- **Save** (or Ctrl+S) validates first, using the same checks as Reload config. If something is wrong, the window
+  stays open and the problem is shown in red at the bottom. Otherwise it writes settings.json and the running
+  MwbLite picks it up:
+  - **Normal mode:** MwbLite notices the saved file and reloads straight away.
   - **Service mode:** a UAC prompt copies it to the service's protected copy.
   - **Service mode turned on but not installed yet:** the window offers the one-time install.
+- Closing with unsaved changes asks whether to save them.
 - **Saving rewrites settings.json.** Comments are removed (you're asked first), and the previous file is kept as
   `settings.json.bak`. Values the window doesn't show (e.g. `easyMouseFullscreenExcludedApps`) are kept.
-- **Open JSON…** opens the file in Notepad for anything else.
-- **It runs as you.** In service mode the tray belongs to a SYSTEM process, so the window opens as a separate
-  `MwbLite.exe --settings` process with your token, never as SYSTEM.
+- **It runs as you, in its own process** (`MwbLite.exe --settings`), never as SYSTEM, in normal and service mode
+  alike.
+
+![Settings in dark mode](docs/settings-dark.png)
 
 ## Arranging the PCs
 
-Open Settings and drag the tiles under **Machines and layout** until they match where the PCs sit on your desk,
-then press **Save & apply**. The cursor moves to a PC by leaving the screen on that side.
+Open Settings and drag the tiles on the **PCs** page until they match where the PCs sit on your desk,
+then press **Save**. The cursor moves to a PC by leaving the screen on that side.
 
 - **One row:** tiles left to right. With `LAPTOP1, MINIPC, LAPTOP2`, the mini PC's left edge leads to LAPTOP1 and
   its right edge to LAPTOP2.
@@ -239,9 +263,11 @@ second, never takes the keyboard focus, and closes a few seconds after the copy 
 when a copy has arrived or failed. Cancel works on either PC; the receiving PC deletes the partial file. Turn
 the window and notifications off with **Show file copy progress** in Settings.
 
+![Copy progress](docs/progress.png)
+
 ## Check connection
 
-Settings > **Check connection…** tests, in order:
+Settings > Connection > **Check now** tests, in order:
 
 1. **Settings:** the file is valid, there's a security key, and other PCs are in the layout.
 2. **MwbLite running:** whether it's running on this PC, and whether as a service.
@@ -252,6 +278,8 @@ Settings > **Check connection…** tests, in order:
    two ports, and does it run this version with the same security key? (It opens a secure connection and runs the
    key proof, so the answer is definite, then hangs up.)
 
+![Check connection](docs/check-connection.png)
+
 **Copy results** puts the report on the clipboard. Run it on both PCs when two of them won't connect.
 
 ## Configuration: `%LOCALAPPDATA%\MwbLite\settings.json`
@@ -259,7 +287,7 @@ Settings > **Check connection…** tests, in order:
 The file is JSON. `//` comments and trailing commas are allowed. Three things write it:
 
 - MwbLite creates it when it's missing.
-- The Settings window rewrites it when you press **Save & apply**, or after pairing.
+- The Settings window rewrites it when you press **Save**, or after pairing.
 - A layout change received from another of your PCs (machines, one row/two rows, wrap) is saved into it.
 
 Each write keeps the previous file as `settings.json.bak`.
@@ -392,7 +420,7 @@ connected PCs, and each saves it to its own settings.json. MwbLite also pre-load
 machine pool, as upstream's pairing did. Without that, MWB would reorder the layout the first time it met a PC
 it didn't know.
 
-**To remove a PC or revoke a key**, press **Reset pairing…** (Settings > Show advanced settings) on one PC and pair the PCs you want to keep again (or copy
+**To remove a PC or revoke a key**, press **Reset pairing…** (Settings > Advanced) on one PC and pair the PCs you want to keep again (or copy
 the new key to them). A PC with the old key can no longer connect.
 
 ## What was removed or replaced
@@ -437,7 +465,7 @@ No PowerToys DLLs or projects are referenced. The build contains no C++.
 
 The other edited files are the PowerToys seams: `Class/Program.cs`, `Class/Setting.cs` (same members, new backing
 store), `Class/IpcChannel.cs`, `Core/Logger.cs`, `Core/MachineStuff.cs` (`ShowMachineMatrix`), `Form/frmScreen.cs`
-(tray menu, PC list with states, tooltip, amber dot), `Form/frmMatrix.cs` (one telemetry line), `Helper/Program.cs`, `Service/*.cs`. New code lives in
+(tray menu, PC list with states, tooltip, and the tray icon, now drawn by `Lite/Ui/LiteArt`), `Form/frmMatrix.cs` (one telemetry line), `Helper/Program.cs`, `Service/*.cs`. New code lives in
 `src/App/Lite/`.
 
 ### Stubs (fixed values that replace removed features)

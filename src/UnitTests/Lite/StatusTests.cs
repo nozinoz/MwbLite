@@ -102,6 +102,15 @@ public sealed class StatusTests
     }
 
     [TestMethod]
+    public void MappedAddressesShowAsPlainIpv4()
+    {
+        Assert.AreEqual("192.168.1.20", LiteStatus.Display(IPAddress.Parse("::ffff:192.168.1.20")));
+        Assert.AreEqual("192.168.1.20", LiteStatus.Display(IPAddress.Parse("192.168.1.20")));
+        Assert.AreEqual("fe80::1", LiteStatus.Display(IPAddress.Parse("fe80::1")));
+        Assert.IsNull(LiteStatus.Display(null));
+    }
+
+    [TestMethod]
     public void SubnetAndNameToIpHelpers()
     {
         byte[] mask = IPAddress.Parse("255.255.255.0").GetAddressBytes();

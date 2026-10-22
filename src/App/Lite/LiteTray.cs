@@ -17,12 +17,14 @@ namespace MouseWithoutBorders.Lite
 {
     internal static class LiteTray
     {
-        private static FileSystemWatcher serviceSettingsWatcher;
+        private static FileSystemWatcher settingsWatcher;
         private static System.Threading.Timer reloadDebounce;
 
-        private static LiteSettingsForm settingsForm;
-
-        /// <summary>Opens the Settings window (as the interactive user, never as SYSTEM).</summary>
+        /// <summary>
+        /// Opens the Settings window: always its own process ("MwbLite.exe --settings", WPF), as the interactive user
+        /// (never as SYSTEM). In normal mode the running MwbLite reloads when that window saves settings.json
+        /// (<see cref="WatchUserSettings"/>).
+        /// </summary>
         internal static void ShowSettings()
         {
             if (Common.RunOnLogonDesktop || Common.RunOnScrSaverDesktop)
@@ -35,24 +37,11 @@ namespace MouseWithoutBorders.Lite
                 if (LitePaths.IsSystem)
                 {
                     _ = Launch.CreateProcessInInputDesktopSession("\"" + LitePaths.ExePath + "\"", "--settings", "default", 1);
-                    return;
                 }
-
-                Common.DoSomethingInUIThread(() =>
+                else
                 {
-                    if (settingsForm != null && !settingsForm.IsDisposed)
-                    {
-                        settingsForm.Activate();
-                        return;
-                    }
-
-                    settingsForm = LiteSettingsForm.Create(LitePaths.UserSettingsFile, cfg =>
-                    {
-                        ReloadAndReport();
-                        AfterSettingsSaved(cfg);
-                    });
-                    settingsForm?.Show();
-                });
+                    _ = Process.Start(new ProcessStartInfo(LitePaths.ExePath, "--settings") { UseShellExecute = false });
+                }
             }
             catch (Exception e)
             {
@@ -61,31 +50,47 @@ namespace MouseWithoutBorders.Lite
             }
         }
 
-        /// <summary>"MwbLite.exe --settings": the Settings window as its own process (used by the SYSTEM tray).</summary>
+        /// <summary>"MwbLite.exe --settings": the Settings window (WPF, Windows 11 Fluent theme) as its own process.</summary>
         internal static int RunSettingsProcess()
         {
             using var mutex = new System.Threading.Mutex(true, @"Local\MwbLite-Settings", out bool first);
             if (!first)
             {
-                return 0; // already open
+                BringExistingSettingsToFront();
+                return 0;
             }
 
-            var form = LiteSettingsForm.Create(LitePaths.UserSettingsFile, cfg =>
+            var app = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnMainWindowClose };
+#pragma warning disable WPF0001 // Fluent theme: supported in .NET 10, still flagged as preview by some SDKs
+            app.ThemeMode = System.Windows.ThemeMode.System;
+#pragma warning restore WPF0001
+            var window = Ui.SettingsWindow.Create(LitePaths.UserSettingsFile, cfg =>
             {
                 string installedExe = Path.Combine(LitePaths.InstallDir, LitePaths.AppName + ".exe");
                 LiteStartup.Sync(cfg.StartWithWindows, File.Exists(installedExe) ? installedExe : LitePaths.ExePath);
-                if (!AfterSettingsSaved(cfg))
-                {
-                    _ = MessageBox.Show("Settings saved. If MwbLite is running, choose Reload config in its tray menu.", "MwbLite Settings", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
+                _ = AfterSettingsSaved(cfg); // normal mode: the running MwbLite reloads by itself (WatchUserSettings)
             });
 
-            if (form != null)
+            if (window != null)
             {
-                Application.Run(form);
+                _ = app.Run(window);
             }
 
             return 0;
+        }
+
+        private static void BringExistingSettingsToFront()
+        {
+            foreach (Process p in Process.GetProcessesByName(LitePaths.AppName))
+            {
+                using (p)
+                {
+                    if (p.Id != Environment.ProcessId && p.MainWindowHandle != IntPtr.Zero && p.MainWindowTitle == "MwbLite Settings")
+                    {
+                        _ = NativeMethods.SetForegroundWindow(p.MainWindowHandle);
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -198,22 +203,27 @@ namespace MouseWithoutBorders.Lite
         }
 
         /// <summary>SYSTEM instances: reload when the elevated --apply-config command updates settings.json.</summary>
-        internal static void WatchServiceSettings()
+        internal static void WatchServiceSettings() => WatchSettings(LitePaths.ServiceDir);
+
+        /// <summary>Normal mode: reload when the Settings window (its own process) or pairing saves settings.json.</summary>
+        internal static void WatchUserSettings() => WatchSettings(LitePaths.UserDir);
+
+        private static void WatchSettings(string dir)
         {
             try
             {
-                serviceSettingsWatcher = new FileSystemWatcher(LitePaths.ServiceDir, LitePaths.SettingsFileName)
+                settingsWatcher = new FileSystemWatcher(dir, LitePaths.SettingsFileName)
                 {
                     NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
                 };
 
                 FileSystemEventHandler onChange = (s, e) => reloadDebounce?.Change(750, System.Threading.Timeout.Infinite);
-                serviceSettingsWatcher.Changed += onChange;
-                serviceSettingsWatcher.Created += onChange;
-                serviceSettingsWatcher.Renamed += (s, e) => onChange(s, e);
+                settingsWatcher.Changed += onChange;
+                settingsWatcher.Created += onChange;
+                settingsWatcher.Renamed += (s, e) => onChange(s, e);
 
                 reloadDebounce = new System.Threading.Timer(_ => Common.DoSomethingInUIThread(ReloadAndReport));
-                serviceSettingsWatcher.EnableRaisingEvents = true;
+                settingsWatcher.EnableRaisingEvents = true;
             }
             catch (Exception e)
             {
@@ -279,14 +289,14 @@ namespace MouseWithoutBorders.Lite
                 }
 
                 StatusSnapshot status = LiteStatus.Refresh();
-                string signature = status.Signature;
+                string signature = status.Signature + "|" + Ui.TaskbarTheme.IsLight; // a theme change redraws the glyph
                 if (signature != lastSignature)
                 {
                     lastSignature = signature;
                     Common.MainForm?.SetTrayIconText(LiteStatus.TrayText(status));
                     if (Common.ToggleIcons == null)
                     {
-                        Common.MainForm?.ChangeIcon(-1); // amber dot on/off
+                        Common.MainForm?.ChangeIcon(-1); // status dot colour
                     }
 
                     PcStatus mismatch = status.Pcs.FirstOrDefault(p => p.State == PcState.KeyMismatch);

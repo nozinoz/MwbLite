@@ -1,6 +1,6 @@
-// MwbLite: tests for the visual layout editor's operations (drag = MoveTile).
+// MwbLite: tests for the layout editor's model (drag = MoveTile).
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using MouseWithoutBorders.Lite;
+using MouseWithoutBorders.Lite.Ui;
 
 namespace MouseWithoutBorders.UnitTests.Lite;
 
@@ -10,7 +10,7 @@ public sealed class LayoutEditorTests
     [TestMethod]
     public void MovingAPcSwapsWithTheTargetSlot()
     {
-        using var editor = new LayoutEditor { Slots = new[] { "minipc", "laptop1", "", "laptop2" } };
+        var editor = new LayoutModel { Slots = new[] { "minipc", "laptop1", "", "laptop2" } };
         int changes = 0;
         editor.LayoutChanged += (s, e) => changes++;
 
@@ -29,7 +29,7 @@ public sealed class LayoutEditorTests
     [TestMethod]
     public void AddAndRemoveNames()
     {
-        using var editor = new LayoutEditor { Slots = new[] { "A", "", "C", "" } };
+        var editor = new LayoutModel { Slots = new[] { "A", "", "C", "" } };
 
         Assert.IsTrue(editor.AddName("b"));
         CollectionAssert.AreEqual(new[] { "A", "B", "C", "" }, editor.Slots);
@@ -44,7 +44,7 @@ public sealed class LayoutEditorTests
     [TestMethod]
     public void NeighboursFollowOneRowAndGrid()
     {
-        using var editor = new LayoutEditor { OneRow = true };
+        var editor = new LayoutModel { OneRow = true };
         Assert.AreEqual(1, editor.Neighbour(0, 1, 0));
         Assert.AreEqual(-1, editor.Neighbour(3, 1, 0));
         Assert.AreEqual(-1, editor.Neighbour(1, 0, 1), "one row has nothing below");

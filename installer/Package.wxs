@@ -58,9 +58,14 @@
 
     <!-- Full uninstall only (not upgrades): remove the user's Run entry and the protected service data. -->
     <CustomAction Id="RemoveStartupEntry" FileRef="MwbLiteExe" ExeCommand="--remove-startup" Execute="deferred" Impersonate="yes" Return="ignore" />
+
+    <!-- Setup's "Start MwbLite when I sign in" box (STARTWITHWINDOWS=1): turn startWithWindows on for the installing
+         user (runs as that user). Unticked changes nothing. -->
+    <CustomAction Id="SetStartupEntry" FileRef="MwbLiteExe" ExeCommand="--enable-startup" Execute="deferred" Impersonate="yes" Return="ignore" />
     <CustomAction Id="RemoveServiceData" FileRef="MwbLiteExe" ExeCommand="--uninstall-cleanup" Execute="deferred" Impersonate="no" Return="ignore" />
     <InstallExecuteSequence>
       <Custom Action="StopRunningMwbLite" Before="InstallValidate" />
+      <Custom Action="SetStartupEntry" After="InstallFiles" Condition="STARTWITHWINDOWS=&quot;1&quot; AND NOT REMOVE~=&quot;ALL&quot;" />
       <Custom Action="RemoveStartupEntry" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="RemoveServiceData" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>

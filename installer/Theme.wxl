@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Strings for installer\Theme.xml. Based on WiX 5.0.2's HyperlinkTheme.wxl (src/ext/Bal/stdbas/Resources),
+  Copyright (c) .NET Foundation and contributors, Microsoft Reciprocal License (see NOTICE.md); modified for MwbLite:
+  plainer wording, new strings for the Start-with-Windows box and the success page, and no FilesInUse* strings.
+
+  Without the FilesInUse strings the standard BA never shows its "Files In Use" dialog. MwbLite runs on the .NET
+  runtime, and Windows Installer matches in-use files by name, so every other .NET app (WhatsApp, Phone Link,
+  PowerShell, ...) would be listed as using MwbLite's files during an upgrade, with no way to satisfy the prompt.
+  MwbLite's own processes are stopped by the MSI before InstallValidate (Package.wxs); a genuinely locked file is
+  replaced at the next restart, as in a silent install.
+-->
+<WixLocalization Culture="en-us" Language="1033" xmlns="http://wixtoolset.org/schemas/v4/wxl">
+  <String Id="Caption" Value="[WixBundleName] Setup" />
+  <String Id="Title" Value="[WixBundleName]" />
+  <String Id="CheckingForUpdatesLabel" Value="Checking for updates" />
+  <String Id="UpdateButton" Value="&amp;Update to version [WixStdBAUpdateAvailable]" />
+  <String Id="InstallHeader" Value="Install MwbLite [WixBundleVersion]" />
+  <String Id="InstallMessage" Value="Share one keyboard, mouse and clipboard between your Windows PCs. If this PC needs it, Setup also installs Microsoft's .NET Desktop Runtime." />
+  <String Id="InstallMessageOptions" Value="Share one keyboard, mouse and clipboard between your Windows PCs." />
+  <String Id="InstallVersion" Value="Version [WixBundleVersion]" />
+  <String Id="InstallStartupCheckbox" Value="&amp;Start MwbLite when I sign in to Windows" />
+  <String Id="ConfirmCancelMessage" Value="Are you sure you want to cancel?" />
+  <String Id="ExecuteUpgradeRelatedBundleMessage" Value="Previous version" />
+  <String Id="HelpHeader" Value="Setup help" />
+  <String Id="HelpText" Value="/install | /repair | /uninstall | /layout [directory] - installs, repairs, uninstalls or&#xA;   creates a complete local copy of the bundle in directory. Install is the default.&#xA;&#xA;/passive | /quiet -  displays minimal UI with no prompts or displays no UI and&#xA;   no prompts. By default UI and all prompts are displayed.&#xA;&#xA;/norestart   - suppress any attempts to restart. By default UI will prompt before restart.&#xA;/log log.txt - logs to a specific file. By default a log file is created in %TEMP%.&#xA;&#xA;StartWithWindows=0 - don't add MwbLite to the programs that start when you sign in." />
+  <String Id="HelpCloseButton" Value="&amp;Close" />
+  <String Id="InstallLicenseLinkText" Value="MwbLite is free software under the MIT licence: &lt;a href=&quot;#&quot;&gt;read the licence terms&lt;/a&gt;" />
+  <String Id="InstallAcceptCheckbox" Value="I &amp;agree to the licence terms" />
+  <String Id="InstallOptionsButton" Value="&amp;Options" />
+  <String Id="InstallInstallButton" Value="&amp;Install" />
+  <String Id="InstallCancelButton" Value="&amp;Cancel" />
+  <String Id="OptionsHeader" Value="Setup options" />
+  <String Id="OptionsLocationLabel" Value="Install location:" />
+  <String Id="OptionsBrowseButton" Value="&amp;Browse" />
+  <String Id="OptionsOkButton" Value="&amp;OK" />
+  <String Id="OptionsCancelButton" Value="&amp;Cancel" />
+  <String Id="ProgressHeader" Value="Installing…" />
+  <String Id="ProgressLabel" Value="Processing:" />
+  <String Id="OverallProgressPackageText" Value="Getting ready…" />
+  <String Id="ProgressCancelButton" Value="&amp;Cancel" />
+  <String Id="ModifyHeader" Value="MwbLite is installed" />
+  <String Id="ModifyMessage" Value="Repair puts back any missing files, the service and the firewall rules. Uninstall removes MwbLite; your own settings are kept." />
+  <String Id="ModifyRepairButton" Value="&amp;Repair" />
+  <String Id="ModifyUninstallButton" Value="&amp;Uninstall" />
+  <String Id="ModifyCancelButton" Value="&amp;Cancel" />
+  <String Id="SuccessHeader" Value="Done" />
+  <String Id="SuccessCacheHeader" Value="Done" />
+  <String Id="SuccessInstallHeader" Value="MwbLite is ready" />
+  <String Id="SuccessInstallMessage" Value="It runs in the notification area. Open Settings from its icon to pair your PCs: Add a PC on one, Join on the other." />
+  <String Id="SuccessLayoutHeader" Value="Done" />
+  <String Id="SuccessModifyHeader" Value="Done" />
+  <String Id="SuccessRepairHeader" Value="MwbLite is repaired" />
+  <String Id="SuccessUninstallHeader" Value="MwbLite was removed" />
+  <String Id="SuccessUnsafeUninstallHeader" Value="MwbLite was removed" />
+  <String Id="SuccessLaunchButton" Value="&amp;Open MwbLite" />
+  <String Id="SuccessRestartText" Value="Restart your computer to finish." />
+  <String Id="SuccessUninstallRestartText" Value="Restart your computer to finish removing MwbLite." />
+  <String Id="SuccessRestartButton" Value="&amp;Restart" />
+  <String Id="SuccessCloseButton" Value="&amp;Close" />
+  <String Id="FailureHeader" Value="Setup didn't finish" />
+  <String Id="FailureCacheHeader" Value="Setup didn't finish" />
+  <String Id="FailureInstallHeader" Value="MwbLite wasn't installed" />
+  <String Id="FailureLayoutHeader" Value="Setup didn't finish" />
+  <String Id="FailureModifyHeader" Value="Setup didn't finish" />
+  <String Id="FailureRepairHeader" Value="Repair didn't finish" />
+  <String Id="FailureUninstallHeader" Value="MwbLite wasn't removed" />
+  <String Id="FailureUnsafeUninstallHeader" Value="MwbLite wasn't removed" />
+  <String Id="FailureHyperlinkLogText" Value="Something went wrong. Nothing was changed. The &lt;a href=&quot;#&quot;&gt;log file&lt;/a&gt; has the details." />
+  <String Id="FailureRestartText" Value="Restart your computer to finish undoing the changes." />
+  <String Id="FailureRestartButton" Value="&amp;Restart" />
+  <String Id="FailureCloseButton" Value="&amp;Close" />
+</WixLocalization>

@@ -116,7 +116,7 @@ namespace MouseWithoutBorders.Lite
 
         internal static Stream Establish(Socket socket, bool isClient, string peer, string securityKey)
         {
-            string address = (socket.RemoteEndPoint as IPEndPoint)?.Address.ToString();
+            string address = LiteStatus.Display((socket.RemoteEndPoint as IPEndPoint)?.Address);
             int oldReceive = socket.ReceiveTimeout, oldSend = socket.SendTimeout;
             socket.ReceiveTimeout = socket.SendTimeout = (int)HandshakeTimeout.TotalMilliseconds;
             try

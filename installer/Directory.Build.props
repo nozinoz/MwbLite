@@ -10,7 +10,7 @@
     <DefineConstants>ProductVersion=$(ProductVersion);PayloadDir=$(PayloadDir);AppIcon=$(MSBuildThisFileDirectory)..\src\App\Logo.ico;DotNetRuntimeVersion=$(DotNetRuntimeVersion);DotNetRuntimeUrl=$(DotNetRuntimeUrl);DotNetRuntimeSha512=$(DotNetRuntimeSha512);DotNetRuntimeSize=$(DotNetRuntimeSize)</DefineConstants>
     <!-- Optional code signing, see Signing.targets (enabled by build.ps1 -CertThumbprint / -SignToolArgs). -->
     <CustomAfterWixTargets>$(MSBuildThisFileDirectory)Signing.targets</CustomAfterWixTargets>
-    <!-- RtfTheme.wxl is the Setup wizard's strings (a bundle payload), not a localization of these packages. -->
+    <!-- Theme.wxl is the Setup wizard's strings (a bundle payload), not a localization of these packages. -->
     <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
   </PropertyGroup>
 </Project>

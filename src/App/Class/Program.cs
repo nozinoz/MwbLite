@@ -229,6 +229,11 @@ namespace MouseWithoutBorders.Class
                     // settings.json here only changes through the elevated --apply-config command.
                     LiteTray.WatchServiceSettings();
                 }
+                else
+                {
+                    // MwbLite: the Settings window is its own process; reload when it (or pairing) saves.
+                    LiteTray.WatchUserSettings();
+                }
 
                 Core.Helper.WndProcCounter++;
 

@@ -1,6 +1,6 @@
 <!--
-  MwbLite-Setup.exe: a WiX Burn bundle around the MwbLite MSI. Shows the licence, installs with one UAC
-  prompt, and offers to launch MwbLite (unelevated) when done. Registers in Settings > Apps as "MwbLite".
+  MwbLite-Setup.exe: a WiX Burn bundle around the MwbLite MSI, with MwbLite's own theme. It links the licence,
+  installs with one UAC prompt, and offers to launch MwbLite (unelevated) when done. Registers in Settings > Apps as "MwbLite".
 
   MwbLite uses the shared .NET Desktop Runtime. If the PC doesn't have version $(var.DotNetRuntimeVersion) or a newer
   10.0 patch, Setup downloads Microsoft's installer (checked against the SHA-512 in DotNetRuntime.props) and runs
@@ -14,14 +14,21 @@
           Version="$(var.ProductVersion)"
           UpgradeCode="D495CCAD-0937-4604-B659-4A3607355BE5"
           IconSourceFile="$(var.AppIcon)">
+    <!-- MwbLite's own Setup theme (Theme.xml / Theme.wxl): banner, licence link, Start-with-Windows box. -->
     <BootstrapperApplication>
-      <bal:WixStandardBootstrapperApplication Theme="rtfLicense"
-                                              LicenseFile="License.rtf"
-                                              LocalizationFile="RtfTheme.wxl"
+      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense"
+                                              ThemeFile="Theme.xml"
+                                              LocalizationFile="Theme.wxl"
+                                              LicenseUrl="LICENSE.txt"
                                               LaunchTarget="[ProgramFiles64Folder]MwbLite\MwbLite.exe"
                                               ShowVersion="yes"
                                               SuppressOptionsUI="yes" />
+      <Payload SourceFile="Assets\banner.png" Name="banner.png" />
+      <Payload SourceFile="..\LICENSE" Name="LICENSE.txt" />
     </BootstrapperApplication>
+
+    <!-- "Start MwbLite when I sign in" on the Install page (StartWithWindows=0 on the command line turns it off). -->
+    <Variable Name="StartWithWindows" Type="numeric" Value="1" bal:Overridable="yes" />
 
     <netfx:DotNetCoreSearch Id="DesktopRuntimeSearch" RuntimeType="desktop" Platform="x64" MajorVersion="10" Variable="DesktopRuntimeVersion" />
 
@@ -46,7 +53,9 @@
         <ExitCode Value="1638" Behavior="success" />
         <ExitCode Value="3010" Behavior="scheduleReboot" />
       </ExePackage>
-      <MsiPackage SourceFile="$(var.MwbLite.Installer.TargetPath)" />
+      <MsiPackage SourceFile="$(var.MwbLite.Installer.TargetPath)">
+        <MsiProperty Name="STARTWITHWINDOWS" Value="[StartWithWindows]" />
+      </MsiPackage>
     </Chain>
   </Bundle>
 </Wix>

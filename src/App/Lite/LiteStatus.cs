@@ -124,10 +124,10 @@ namespace MouseWithoutBorders.Lite
                 {
                     foreach (TcpSk t in sk.TcpSockets ?? new List<TcpSk>())
                     {
-                        string address = t.Address?.ToString();
+                        string address = Display(t.Address);
                         try
                         {
-                            address ??= (t.BackingSocket?.RemoteEndPoint as IPEndPoint)?.Address.ToString();
+                            address ??= Display((t.BackingSocket?.RemoteEndPoint as IPEndPoint)?.Address);
                         }
                         catch (Exception e) when (e is ObjectDisposedException or System.Net.Sockets.SocketException)
                         {
@@ -173,6 +173,10 @@ namespace MouseWithoutBorders.Lite
 
             return pcs;
         }
+
+        /// <summary>"192.168.1.20" rather than "::ffff:192.168.1.20" (MWB's sockets are dual-mode IPv6).</summary>
+        internal static string Display(IPAddress address) =>
+            address == null ? null : (address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address).ToString();
 
         /// <summary>Tray tooltip (Windows allows 127 characters).</summary>
         internal static string TrayText(StatusSnapshot s)

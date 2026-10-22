@@ -657,75 +657,15 @@ namespace MouseWithoutBorders
         {
             try
             {
-                Graphics g;
-                Pen p;
-                Bitmap bm = Images.notify_default;
-
-                /*
-                if (curIcon == Common.ICON_ONE)
-                {
-                    string[] x = Common.MachineMatrix;
-                    Graphics g = Graphics.FromImage(bm);
-                    if (x != null)
-                    {
-                        for (int i = 0; i < Common.MAX_MACHINE; i++)
-                        {
-                            if (x[i].Trim().Length > 0) g.FillEllipse(
-                                #if DEBUG
-                                Brushes.White,
-                                #else
-                                Brushes.Salmon,
-                                #endif
-                                3 + (i % 2) * 16, 3 + (i / 2) * 16, 10, 10);
-                        }
-                    }
-                    g.Dispose();
-                }
-                */
-
-                if (CurIcon != Common.ICON_ONE)
-                {
-                    p = new Pen(Color.Red, 2);
-                    g = Graphics.FromImage(bm);
-                    g.DrawRectangle(p, 1, 1, bm.Width - 2, bm.Height - 2);
-                    g.Dispose();
-                }
-
-                if (iconCode == Common.ICON_SMALL_CLIPBOARD)
-                {
-                    g = Graphics.FromImage(bm);
-                    g.FillEllipse(Brushes.Blue, 8, 8, 16, 16);
-                    g.Dispose();
-                }
-                else if (iconCode == Common.ICON_BIG_CLIPBOARD)
-                {
-                    g = Graphics.FromImage(bm);
-                    g.FillEllipse(Brushes.Yellow, 8, 8, 16, 16);
-                    g.Dispose();
-                }
-                else if (iconCode == Common.ICON_ERROR)
-                {
-                    g = Graphics.FromImage(bm);
-                    g.FillEllipse(Brushes.Red, 8, 8, 16, 16);
-                    g.Dispose();
-                }
-                else if (Lite.LiteStatus.Current.AnyMissing)
-                {
-                    // MwbLite: amber dot when a PC in the layout isn't connected.
-                    int d = bm.Width * 7 / 16;
-                    g = Graphics.FromImage(bm);
-                    g.FillEllipse(Brushes.Orange, bm.Width - d - 1, bm.Height - d - 1, d, d);
-                    g.DrawEllipse(Pens.Black, bm.Width - d - 1, bm.Height - d - 1, d, d);
-                    g.Dispose();
-                }
-
-#if DEBUG
-                p = new Pen(Color.White, 4);
-                g = Graphics.FromImage(bm);
-                g.DrawRectangle(p, 6, 6, bm.Width - 12, bm.Height - 12);
-                g.Dispose();
-                p.Dispose();
-#endif
+                // MwbLite: the glyph in the taskbar's colour with a connection-status dot (Lite/Ui/LiteArt):
+                // green all PCs connected, amber connecting, red a PC missing; a small pip for clipboard/file
+                // activity (upstream's animation codes); a red outline in "all PCs" mode.
+                Bitmap bm = Lite.Ui.LiteArt.TrayBitmap(
+                    SystemInformation.SmallIconSize.Width,
+                    Lite.Ui.TaskbarTheme.IsLight,
+                    iconCode == Common.ICON_ERROR ? Lite.Ui.TrayDot.Red : Lite.Ui.LiteArt.DotFor(Lite.LiteStatus.Current),
+                    iconCode is Common.ICON_SMALL_CLIPBOARD or Common.ICON_BIG_CLIPBOARD,
+                    CurIcon != Common.ICON_ONE);
 
                 Logger.LogDebug($"Changing icon to {iconCode}.");
 

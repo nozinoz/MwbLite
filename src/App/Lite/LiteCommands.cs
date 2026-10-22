@@ -89,6 +89,13 @@ namespace MouseWithoutBorders.Lite
 
                         return 0;
 
+                    // Run by Setup as the installing user when "Start MwbLite when I sign in" is ticked.
+                    case "--enable-startup":
+                        LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");
+                        _ = EnableStartupInConfig(LitePaths.UserSettingsFile);
+                        LiteStartup.Sync(true, LitePaths.ExePath);
+                        return 0;
+
                     // Run by the Setup uninstaller as the installing user: remove the per-user start-with-Windows entry.
                     case "--remove-startup":
                         LiteStartup.Sync(false, LitePaths.ExePath);
@@ -118,6 +125,21 @@ namespace MouseWithoutBorders.Lite
                         Show(Usage, MessageBoxIcon.Information);
                         return 0;
 
+                    // Development: render the Settings pages and pairing window to PNGs (light and dark).
+                    case "--render-ui":
+                        LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");
+                        return Ui.UiPreview.Run(args.Length > 2 ? args[2] : Environment.CurrentDirectory);
+
+                    // Development: regenerate src\App\Logo.ico and installer\Assets from Lite/Ui/LiteArt (tools\make-art.ps1).
+                    case "--make-art":
+                        Ui.LiteArt.MakeArt(args.Length > 2 ? args[2] : Environment.CurrentDirectory);
+                        if (args.Length > 3)
+                        {
+                            Ui.LiteArt.PreviewSheet(args[3]);
+                        }
+
+                        return 0;
+
                     default:
                         Show("Unknown option " + args[1] + "\r\n\r\n" + Usage, MessageBoxIcon.Warning);
                         return 2;
@@ -129,6 +151,30 @@ namespace MouseWithoutBorders.Lite
                 Show(cmd + " failed:\r\n" + e.Message, MessageBoxIcon.Error);
                 return 1;
             }
+        }
+
+        /// <summary>
+        /// Sets startWithWindows in a settings file (creating it with defaults if missing). Returns true if the file
+        /// was written. A file whose key this account can't decrypt is left alone, so the key isn't lost.
+        /// </summary>
+        internal static bool EnableStartupInConfig(string path)
+        {
+            _ = LiteConfig.WriteDefaultIfMissing(path);
+            var cfg = LiteConfig.TryParse(path, out string error);
+            if (cfg == null || cfg.KeyUnreadable || cfg.StartWithWindows)
+            {
+                if (cfg == null)
+                {
+                    LiteLog.Write(nameof(LiteCommands), "--enable-startup: " + error);
+                }
+
+                return false;
+            }
+
+            cfg.StartWithWindows = true;
+            cfg.Save(path);
+            LiteLog.Write(nameof(LiteCommands), "Start with Windows turned on in " + path);
+            return true;
         }
 
         // ---- unelevated parts --------------------------------------------------------------

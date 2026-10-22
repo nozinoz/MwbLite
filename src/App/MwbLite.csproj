@@ -5,6 +5,10 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- WPF for the Settings and Pairing windows (Fluent theme); WinForms for the engine, tray and progress window. -->
+    <UseWPF>true</UseWPF>
+    <!-- WPF0001: the Fluent theme (ThemeMode) ships in .NET 10 but is still marked "for evaluation". -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
     <AssemblyName>MwbLite</AssemblyName>
     <RootNamespace>MouseWithoutBorders</RootNamespace>
     <StartupObject>MouseWithoutBorders.Class.Program</StartupObject>
