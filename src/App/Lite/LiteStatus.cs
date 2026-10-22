@@ -22,6 +22,7 @@ namespace MouseWithoutBorders.Lite
         Connected,
         Connecting,
         KeyMismatch,
+        OlderVersion,
         NotConnected,
     }
 
@@ -59,7 +60,7 @@ namespace MouseWithoutBorders.Lite
 
         internal int ConnectedCount => Pcs.Count(p => p.State == PcState.Connected);
 
-        internal bool AnyMissing => Pcs.Any(p => p.State is PcState.NotConnected or PcState.Connecting or PcState.KeyMismatch);
+        internal bool AnyMissing => Pcs.Any(p => p.State is PcState.NotConnected or PcState.Connecting or PcState.KeyMismatch or PcState.OlderVersion);
 
         /// <summary>Changes only when something the user would see changes (not the timestamp).</summary>
         internal string Signature => string.Join(";", Pcs.Select(p => p.Name + "=" + p.State)) + "|" + string.Join(";", Transfers.Select(t => t.Name + "=" + t.Percent));
@@ -75,6 +76,7 @@ namespace MouseWithoutBorders.Lite
             PcState.Connected => "Connected",
             PcState.Connecting => "Connecting…",
             PcState.KeyMismatch => "Security key doesn't match",
+            PcState.OlderVersion => "Older version, not secure (refused)",
             _ => "Not connected",
         };
 
@@ -142,7 +144,7 @@ namespace MouseWithoutBorders.Lite
                 UpdatedUtc = now,
                 ThisPc = Common.MachineName?.Trim() ?? string.Empty,
                 ServiceMode = LitePaths.IsSystem,
-                Pcs = Fold(MachineStuff.MachineMatrix ?? Array.Empty<string>(), Common.MachineName?.Trim() ?? string.Empty, facts),
+                Pcs = WithSecureChannelEvents(Fold(MachineStuff.MachineMatrix ?? Array.Empty<string>(), Common.MachineName?.Trim() ?? string.Empty, facts)),
                 Transfers = LiteTransfers.Snapshot(now).Select(t => new TransferStatus
                 {
                     Name = t.Name,
@@ -152,6 +154,24 @@ namespace MouseWithoutBorders.Lite
             };
             Current = snapshot;
             return snapshot;
+        }
+
+        // Rejections by the secure channel close the socket at once, so they are remembered there for a while.
+        private static List<PcStatus> WithSecureChannelEvents(List<PcStatus> pcs)
+        {
+            foreach (PcStatus p in pcs.Where(p => p.State is PcState.NotConnected or PcState.Connecting))
+            {
+                if (LiteSecureChannel.RecentKeyMismatch(p.Name))
+                {
+                    p.State = PcState.KeyMismatch;
+                }
+                else if (LiteSecureChannel.RecentInsecureRejected(p.Name))
+                {
+                    p.State = PcState.OlderVersion;
+                }
+            }
+
+            return pcs;
         }
 
         /// <summary>Tray tooltip (Windows allows 127 characters).</summary>

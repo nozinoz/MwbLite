@@ -249,7 +249,8 @@ Settings > **Check connection…** tests, in order:
    no admin needed). It also finds the *Block* rules Windows adds when someone dismisses its firewall prompt.
    **Fix firewall…** (one UAC prompt) replaces every inbound rule for MwbLite with MwbLite's own allow rules.
 4. **Each PC:** connected now? If not: can its name be found, is it on this subnet, does MwbLite answer on its
-   two ports, and does it have a different security key?
+   two ports, and does it run this version with the same security key? (It opens a secure connection and runs the
+   key proof, so the answer is definite, then hangs up.)
 
 **Copy results** puts the report on the clipboard. Run it on both PCs when two of them won't connect.
 
@@ -291,6 +292,7 @@ next to it.
     "moveMouseRelatively": false,
     "blockMouseAtScreenCorners": false,
     "showClipboardAndNetworkStatusMessages": false,
+    "allowInsecureConnections": false,
     "easyMouse": "enable",
     "disableEasyMouseWhenForegroundWindowIsFullscreen": true,
     "easyMouseFullscreenExcludedApps": [],
@@ -323,6 +325,7 @@ next to it.
 | `advanced.name2Ip` | `[]` | Static `"NAME IP"` mappings, used when name resolution is unreliable. |
 | `advanced.easyMouse` | `enable` | `enable` (cross edges freely), `disable` (hotkeys only), `ctrl` or `shift` (hold the key to cross). |
 | `advanced.hotkeys.*` | upstream defaults | `"Win+Ctrl+Alt+E"` style strings; `""` disables a hotkey. `switchMachine` is `"F1"` (Ctrl+Alt+F1…F4), `"1"` (Ctrl+Alt+1…4) or `"disabled"`. |
+| `advanced.allowInsecureConnections` | `false` | Also accept PCs without MwbLite's secure connection (MwbLite before 0.6, PowerToys MWB). Not secure; only for a short changeover. |
 | other `advanced.*` | upstream defaults | Same meaning as the PowerToys MWB settings with the same names. |
 
 **Reload config** validates the file first. If it's invalid, nothing changes and a balloon names the problem.
@@ -359,11 +362,25 @@ key and the same machine list onto every PC *is* pairing. You can do it in two w
   the codes differ, press Cancel and nothing changes.
 - **By hand.** Copy the key and type the same machine names on every PC.
 
-**Once paired, MWB connects** using upstream's protocol, unchanged. Each PC connects to the others by name on
-TCP `tcpPort`+1 (input and control) and `tcpPort` (clipboard and files). Each connection derives an AES-256 key
-from the security key (PBKDF2-SHA512, 100,000 iterations, fresh random salt and IV). A challenge-response
-handshake proves both sides have the key; a wrong key is dropped after 10 bad packets. The key itself never
-crosses the network after pairing.
+**Once paired, MWB connects** inside a secure connection. Each PC connects to the others by name on TCP
+`tcpPort`+1 (input and control) and `tcpPort` (clipboard and files), and every connection is set up in two steps:
+
+1. **TLS 1.3** (1.2 if needed) with a certificate on each side. Each PC makes its own self-signed certificate once
+   (ECDSA P-256, in the running account's certificate store as "MwbLite secure channel").
+2. **Key proof** inside TLS. Each side sends an HMAC of both certificates under a key derived from the security
+   key (HKDF-SHA256), and checks the other's. The certificates themselves aren't trusted; the proof is what
+   counts. Because it covers both certificates, a relay in the middle can't pass it without the security key.
+   The key itself never crosses the network after pairing.
+
+Only then does upstream MWB's own protocol start, unchanged, inside the tunnel. It still derives its AES-256 key
+from the security key (PBKDF2-SHA512, 100,000 iterations, fresh random salt and IV) and runs its challenge-response
+handshake. A PC with a different key is refused at step 2: the tray and Check connection say "Security key doesn't
+match".
+
+**Older versions.** MwbLite before 0.6 and PowerToys' Mouse Without Borders don't do step 1 or 2, so by default
+they are refused, and the tray shows them as "Older version, not secure". **Update every PC** to the same version.
+If you must mix versions for a while, tick **Allow older versions (not secure)** under Advanced on the new PCs:
+those connections then have only upstream's protection.
 
 **Staying connected.** MwbLite reconnects by itself when a PC wakes from sleep, when its network changes (new
 Wi-Fi, new IP address, a cable plugged in) and when a peer vanishes. Each connection uses TCP keepalive, so a PC
@@ -400,7 +417,7 @@ No PowerToys DLLs or projects are referenced. The build contains no C++.
 **Engine files left byte-for-byte unchanged:**
 
 - **Crypto and keys:** `Core/Encryption.cs`, `Class/PairingKeyCodec.cs`, `Class/PassthroughPairingKeyCodec.cs`, `Class/DpapiPairingKeyCodec.cs`.
-- **Network and protocol:** `Class/TcpServer.cs`, `Core/Package*.cs`. (`Class/SocketStuff.cs`, `Core/Clipboard.cs` and `Core/Receiver.cs` have small edits, listed below; the bytes on the wire are unchanged.)
+- **Network and protocol:** `Class/TcpServer.cs`, `Core/Package*.cs`. (`Class/SocketStuff.cs`, `Core/Clipboard.cs` and `Core/Receiver.cs` have small edits, listed below. MWB's own messages are unchanged; since 0.6 they travel inside TLS.)
 - **Input injection:** `Class/InputSimulation.cs`.
 - **Process launch and native calls:** `Core/Launch.cs`, `Core/WinAPI.cs`, `Class/NativeMethods.cs`.
 
@@ -413,6 +430,7 @@ No PowerToys DLLs or projects are referenced. The build contains no C++.
 | `Class/SocketStuff.cs` (send step), `Core/Clipboard.cs` (receive step), `Helper/FormHelper.cs` (copy and drag) | A selection with folders or several files is announced as a bundle. The sender asks `Lite/LiteFileBundle` for the bundle's zip, and the receiver unpacks it. A single file takes the original path. | Copying folders and several files at once. MWB still transfers exactly one file, with the same header and data. |
 | `Class/SocketStuff.cs` (file send loop), `Core/Clipboard.cs` (file receive loop), `Core/Receiver.cs` (passes the peer's name) | Each loop reports its byte count to `Lite/LiteTransfers`. The send counter is a `long` (it was an `int`, which overflowed above 2 GB on drag and drop). | The progress window, Cancel and the copy notifications. Cancel closes the transfer's socket, which both loops already handled as a failed copy. |
 | `Class/SocketStuff.cs` (`MainTCPRoutine`, `StartNewTcpClientThread`), `Exceptions/ExpectedSocketException.cs` | TCP keepalive on each connection (10 s idle, 3 s interval, 3 probes). The connect-retry window starts per connection attempt. A timed-out or aborted connection (WSAETIMEDOUT, WSAECONNABORTED) triggers a redial like a reset one did. | A sleeping or vanished PC was only noticed after many minutes, and connection attempts started later than 30 s after the sockets opened got a single try. |
+| `Class/SocketStuff.cs` (`TcpSk`, `MainTCPRoutine`), `Core/Clipboard.cs` (`ShakeHand`), `Core/Receiver.cs` | Before MWB sends anything, each socket goes through `Lite/LiteSecureChannel` (TLS plus the key proof). MWB's encrypted streams are then built on the TLS stream, and the main channel's two directions share one stream instead of two separate `NetworkStream`s. A failed proof closes the socket and is reported in the tray and Check connection, instead of being marked as MWB's "invalid key" (which stopped all outgoing connections). `ShakeHand` gets a parameter saying which side connected. | Tamper-proof, authenticated connections. MWB's protocol runs unchanged inside them. |
 | `Core/InitAndCleanup.cs` | On suspend and resume the sockets are closed and reopened. `Lite/LiteReconnect` does the same when the PC's IP addresses change. | Upstream only reacted when the network disappeared entirely, so waking a laptop or changing Wi-Fi left dead connections. |
 | `Core/Common.cs` | `ShowToolTip` passes its icon on (it was dropped, so every balloon showed the Info icon). | Warnings and errors look like warnings and errors. |
 | `Core/Helper.cs`, `Helper/FormHelper.Designer.cs`, `Class/IClipboardHelper.cs` | Helper process and window renamed to `MwbLite.Helper` / "MwbLite Helper". Local clipboard pipe renamed to `MwbLite/ClipboardHelper`. `EventLogger` now writes to the log file. | These names were shared with PowerToys MWB. With both installed, MwbLite found PowerToys' helper window, and the pipe could connect to the wrong app. They are local IPC between MwbLite's own two processes, not the network protocol. |
@@ -444,9 +462,13 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
 
 ## Security notes
 
-- **Traffic:** MWB traffic is encrypted with a key derived from `securityKey` (upstream `Encryption.cs`,
-  unchanged). Anyone with the key can control your PCs. Treat settings.json like a password and use the random
-  default or another long key.
+- **Traffic:** every connection is TLS 1.3 (or 1.2) with a security-key proof bound to both certificates, and
+  MWB's own encryption (upstream `Encryption.cs`, unchanged) runs inside it. So traffic can't be read or changed
+  in transit, and only PCs with the key get in. Upstream's AES-CBC on its own had no tamper detection. Anyone with
+  the key can still control your PCs: keep the random default (or another long key) and don't share it.
+- **Older peers are refused** unless you allow them (Advanced > Allow older versions). A refused or wrong-key
+  connection is just closed: it no longer stops your PC from dialling its own peers. Upstream's "too many
+  attempts, the app quits" check now only sees PCs that already passed the key proof.
 - **The SYSTEM instance never reads a user-writable config.** In service mode, MWB runs as SYSTEM on the secure
   desktop and can click "Yes" on UAC prompts. If it trusted a key from a file the user (or malware running as the
   user) can edit, that would be a UAC bypass. So it reads `%ProgramData%\MwbLite\settings.json`, which is
@@ -487,8 +509,11 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
   small-office network. PCs on different subnets or VLANs, or connected over a VPN (e.g. Tailscale), need a
   wider firewall rule, added by an administrator.
 - **x64 only.** Windows on ARM PCs would run the x64 build under emulation; that is untested.
-- **Not tested against stock PowerToys MWB.** The wire protocol and key derivation are unchanged, so mixed setups
-  should work, but this has not been tested.
+- **Doesn't connect to PowerToys MWB or MwbLite before 0.6** unless **Allow older versions** is ticked; see
+  [How pairing works](#how-pairing-works). With it ticked, mixed setups use upstream's protocol and should work, but
+  this has not been tested against PowerToys.
+- **A little extra CPU per connection:** each connection does a TLS handshake (a few milliseconds), and every
+  message is encrypted twice (TLS, then MWB's own AES). The messages are small; the cost isn't noticeable.
 - **Updates are manual.** See below.
 - **Notepad is always used** by "Open config file", not your default `.json` editor.
 

@@ -475,7 +475,7 @@ internal static class Clipboard
 
         bool clientPushData = false;
 
-        if (!ShakeHand(ref remoteMachine, clipboardTcpClient.Client, out Stream enStream, out Stream deStream, ref clientPushData, ref clipboardPostAct))
+        if (!ShakeHand(ref remoteMachine, clipboardTcpClient.Client, out Stream enStream, out Stream deStream, ref clientPushData, ref clipboardPostAct, isClient: true))
         {
             return;
         }
@@ -996,7 +996,7 @@ internal static class Clipboard
         return bytesReceived;
     }
 
-    internal static bool ShakeHand(ref string remoteName, Socket s, out Stream enStream, out Stream deStream, ref bool clientPushData, ref ClipboardPostAction postAction)
+    internal static bool ShakeHand(ref string remoteName, Socket s, out Stream enStream, out Stream deStream, ref bool clientPushData, ref ClipboardPostAction postAction, bool isClient)
     {
         const int CLIPBOARD_HANDSHAKE_TIMEOUT = 30;
         s.ReceiveTimeout = CLIPBOARD_HANDSHAKE_TIMEOUT * 1000;
@@ -1018,7 +1018,8 @@ internal static class Clipboard
 
             byte[] buf = new byte[Package.PACKAGE_SIZE_EX];
 
-            NetworkStream ns = new(s);
+            // MwbLite: TLS and the security-key proof first (Lite/LiteSecureChannel); MWB's streams run inside it.
+            Stream ns = Lite.LiteSecureChannel.Establish(s, isClient, remoteName);
             enStream = Encryption.GetEncryptedStream(ns);
             Common.SendOrReceiveARandomDataBlockPerInitialIV(enStream);
             Logger.LogDebug($"{nameof(ShakeHand)}: Writing header package.");

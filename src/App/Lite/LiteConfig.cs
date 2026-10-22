@@ -98,6 +98,12 @@ namespace MouseWithoutBorders.Lite
 
             public bool ShowClipboardAndNetworkStatusMessages { get; set; }
 
+            /// <summary>
+            /// Also accept PCs that don't speak MwbLite's secure protocol (MwbLite before 0.6, PowerToys MWB). Their
+            /// connection only has upstream's protection (AES-CBC, no tamper detection). Off by default.
+            /// </summary>
+            public bool AllowInsecureConnections { get; set; }
+
             public EasyMouseOption EasyMouse { get; set; } = EasyMouseOption.Enable;
 
             public bool DisableEasyMouseWhenForegroundWindowIsFullscreen { get; set; } = true;

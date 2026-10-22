@@ -98,6 +98,17 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 5b.4 | Open `%LOCALAPPDATA%\MwbLite\settings.json` in Notepad (tray > Open config file). | `"securityKey"` reads `"dpapi:…"`, not your key. `settings.json.bak`, if present, also has no plain key. | |
 | 5b.5 | In settings.json replace the `dpapi:…` value with a plain 16+ character key, save, and restart MwbLite. | It works with that key, and the file shows `dpapi:…` again. (Put the original key back afterwards, or pair again.) | |
 
+## 5c. Secure connection (version 0.6 and later on every PC)
+
+| # | Step | Expected | Result |
+|---|---|---|---|
+| 5c.1 | Install the same version on A and B. Check they connect and that mouse, keyboard, clipboard and a file copy all work. | As before; no visible lag when moving the mouse on the other PC. | |
+| 5c.2 | In an admin prompt on A: `netstat -ano \| findstr 15101`, then capture a few seconds of traffic with `pktmon start --capture -f mwb.etl` / `pktmon stop` while moving the mouse on B (optional). | Connections exist on 15101; the captured payload starts with TLS records (`17 03 03` application data), not MWB's own header. | |
+| 5c.3 | **Wrong key:** on B, Settings > Advanced > **Reset pairing…**, save. | Within a few seconds A's tray shows B as *Security key doesn't match* (one notification), and B shows the same for A. **Neither app quits or freezes**, and A stays connected to any third PC. Check connection on A says "its security key is different". Pair B again: they reconnect. | |
+| 5c.4 | **Older version:** on B install MwbLite 0.5 (or keep one PC on 0.5 while upgrading). | A shows B as *Older version, not secure (refused)* with one notification; Check connection says B "runs an older MwbLite". | |
+| 5c.5 | On A tick Advanced > **Allow older versions (not secure)**, save. | A and the 0.5 PC connect again. Untick it afterwards. | |
+| 5c.6 | `certmgr.msc` (Current User > Personal > Certificates) on A. | One certificate "CN=MwbLite <PC name>" (friendly name "MwbLite secure channel"). It is recreated automatically if deleted. | |
+
 ## 6. Standalone use
 
 | # | Step | Expected | Result |

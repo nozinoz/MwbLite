@@ -64,11 +64,12 @@ namespace MouseWithoutBorders.Lite
 
             // 4. Each PC
             Dictionary<string, string> name2Ip = ParseName2Ip(cfg.Advanced.Name2Ip);
-            await Task.WhenAll(others.Select(async pc => report(await CheckPcAsync(pc, cfg.Advanced.TcpPort, name2Ip, status, ct).ConfigureAwait(false)))).ConfigureAwait(false);
+            await Task.WhenAll(others.Select(async pc => report(await CheckPcAsync(pc, cfg, name2Ip, status, ct).ConfigureAwait(false)))).ConfigureAwait(false);
         }
 
-        private static async Task<CheckItem> CheckPcAsync(string pc, int tcpPort, Dictionary<string, string> name2Ip, StatusSnapshot status, CancellationToken ct)
+        private static async Task<CheckItem> CheckPcAsync(string pc, LiteConfig cfg, Dictionary<string, string> name2Ip, StatusSnapshot status, CancellationToken ct)
         {
+            int tcpPort = cfg.Advanced.TcpPort;
             PcStatus live = status?.Pcs.FirstOrDefault(p => p.Name.Equals(pc, StringComparison.OrdinalIgnoreCase));
             if (live?.State == PcState.Connected)
             {
@@ -109,7 +110,25 @@ namespace MouseWithoutBorders.Lite
             bool mainPort = await CanConnectAsync(target, tcpPort + 1, ct).ConfigureAwait(false);
             bool filePort = await CanConnectAsync(target, tcpPort, ct).ConfigureAwait(false);
 
-            if (live?.State == PcState.KeyMismatch)
+            if (mainPort)
+            {
+                // A secure connection with the key proof says for certain whether the keys match.
+                switch (await LiteSecureChannel.ProbeAsync(target, tcpPort + 1, cfg.SecurityKey, ConnectTimeout, ct).ConfigureAwait(false))
+                {
+                    case LiteSecureChannel.ProbeResult.KeyMismatch:
+                        return new CheckItem(CheckResult.Problem, pc, $"{where} answers, but its security key is different. Pair the PCs again: Add a PC… here, Join… there.");
+                    case LiteSecureChannel.ProbeResult.OlderVersion:
+                        return new CheckItem(CheckResult.Problem, pc, $"{where} runs an older MwbLite (or PowerToys Mouse Without Borders) without the secure connection. Install this version there, or (not recommended) allow older versions in Settings > Advanced on both PCs.");
+                    case LiteSecureChannel.ProbeResult.KeyMatches:
+                        if (filePort && sameSubnet && live?.State != PcState.Connecting)
+                        {
+                            return new CheckItem(CheckResult.Warning, pc, $"{where} answers and has the same security key, but MwbLite isn't connected to it yet. If this lasts, use Reconnect (Win+Ctrl+Alt+R) or restart MwbLite on both PCs.");
+                        }
+
+                        break;
+                }
+            }
+            else if (live?.State == PcState.KeyMismatch)
             {
                 return new CheckItem(CheckResult.Problem, pc, $"{where} answers, but its security key is different. Pair the PCs again: Add a PC… here, Join… there.");
             }

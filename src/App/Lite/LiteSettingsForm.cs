@@ -68,6 +68,7 @@ namespace MouseWithoutBorders.Lite
         private readonly CheckBox blockMouseAtCorners = new();
         private readonly CheckBox showStatusMessages = new();
         private readonly CheckBox noEasyMouseFullscreen = new();
+        private readonly CheckBox allowInsecure = new();
         private readonly Label status = new();
         private bool commentsAcknowledged;
 
@@ -349,6 +350,7 @@ namespace MouseWithoutBorders.Lite
                 (blockMouseAtCorners, "Block switching at screen corners"),
                 (showStatusMessages, "Show clipboard/network messages"),
                 (noEasyMouseFullscreen, "No Easy Mouse over full-screen apps"),
+                (allowInsecure, "Allow older versions (not secure)"),
             })
             {
                 cb.Text = text;
@@ -446,6 +448,7 @@ namespace MouseWithoutBorders.Lite
             blockMouseAtCorners.Checked = adv.BlockMouseAtScreenCorners;
             showStatusMessages.Checked = adv.ShowClipboardAndNetworkStatusMessages;
             noEasyMouseFullscreen.Checked = adv.DisableEasyMouseWhenForegroundWindowIsFullscreen;
+            allowInsecure.Checked = adv.AllowInsecureConnections;
         }
 
         /// <summary>Builds the config to save: the loaded config (so fields not on the form survive) with the form's values.</summary>
@@ -533,6 +536,7 @@ namespace MouseWithoutBorders.Lite
             adv.BlockMouseAtScreenCorners = blockMouseAtCorners.Checked;
             adv.ShowClipboardAndNetworkStatusMessages = showStatusMessages.Checked;
             adv.DisableEasyMouseWhenForegroundWindowIsFullscreen = noEasyMouseFullscreen.Checked;
+            adv.AllowInsecureConnections = allowInsecure.Checked;
 
             cfg.Normalize();
             return cfg;

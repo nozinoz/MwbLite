@@ -251,6 +251,7 @@ namespace MouseWithoutBorders.Lite
         private static string lastSignature;
         private static DateTime lastStatusWrite;
         private static bool keyMismatchNotified;
+        private static bool olderVersionNotified;
         private static bool statusDirReady;
 
         /// <summary>Called by FrmScreen.HelperTimer_Tick (UI thread, every 100 ms).</summary>
@@ -297,6 +298,17 @@ namespace MouseWithoutBorders.Lite
                     else if (mismatch == null)
                     {
                         keyMismatchNotified = false;
+                    }
+
+                    PcStatus older = status.Pcs.FirstOrDefault(p => p.State == PcState.OlderVersion);
+                    if (older != null && !olderVersionNotified)
+                    {
+                        olderVersionNotified = true;
+                        Common.ShowToolTip($"{older.Name} runs an older MwbLite (or PowerToys), which isn't secure, so it was refused. Update it to this version, or allow older versions in Settings > Advanced.", 10000, ToolTipIcon.Warning, true);
+                    }
+                    else if (older == null)
+                    {
+                        olderVersionNotified = false;
                     }
 
                     WriteStatus(status, now);

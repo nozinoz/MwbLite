@@ -95,13 +95,19 @@ namespace MouseWithoutBorders.Class
         private Stream decryptedStream;
         private Stream socketStream;
 
+        /// <summary>
+        /// MwbLite: the TLS stream (Lite/LiteSecureChannel) both directions run over, set by MainTCPRoutine before
+        /// anything is sent. MWB's own encrypted streams sit inside it, unchanged.
+        /// </summary>
+        public Stream SecureStream { get; set; }
+
         public Stream EncryptedStream
         {
             get
             {
                 if (encryptedStream == null && BackingSocket.Connected)
                 {
-                    encryptedStream = Encryption.GetEncryptedStream(new NetworkStream(BackingSocket));
+                    encryptedStream = Encryption.GetEncryptedStream(SecureStream ?? new NetworkStream(BackingSocket));
                     Common.SendOrReceiveARandomDataBlockPerInitialIV(encryptedStream);
                 }
 
@@ -115,7 +121,7 @@ namespace MouseWithoutBorders.Class
             {
                 if (decryptedStream == null && BackingSocket.Connected)
                 {
-                    decryptedStream = Encryption.GetDecryptedStream(new NetworkStream(BackingSocket));
+                    decryptedStream = Encryption.GetDecryptedStream(SecureStream ?? new NetworkStream(BackingSocket));
                     Common.SendOrReceiveARandomDataBlockPerInitialIV(decryptedStream, false);
                 }
 
@@ -1289,6 +1295,20 @@ namespace MouseWithoutBorders.Class
                 currentSocket.NoDelay = true; // This is very interesting to know:(
                 currentSocket.SendTimeout = 500;
                 Lite.LiteReconnect.EnableKeepAlive(currentSocket); // MwbLite: notice a vanished peer in ~20 s
+
+                // MwbLite: TLS and the security-key proof come first; MWB's handshake then runs inside the tunnel.
+                try
+                {
+                    currentTcp.SecureStream = Lite.LiteSecureChannel.Establish(currentSocket, isClient, machineName);
+                }
+                catch (Exception e) when (e is Lite.KeyMismatchException or Lite.InsecurePeerException or System.Security.Authentication.AuthenticationException or IOException or SocketException)
+                {
+                    Logger.Log($"{nameof(MainTCPRoutine)}: secure connection with {machineName} ({Common.GetRemoteStringIP(currentSocket, true)}) failed: {e.Message}");
+                    UpdateTcpSockets(currentTcp, SocketStatus.Error);
+                    currentSocket.Close();
+                    return;
+                }
+
                 d.MachineName = Common.MachineName;
 
                 d.Type = PackageType.Handshake;
@@ -1647,7 +1667,7 @@ namespace MouseWithoutBorders.Class
 
                 bool clientPushData = true;
                 ClipboardPostAction postAction = ClipboardPostAction.Other;
-                bool handShaken = Clipboard.ShakeHand(ref remoteEndPoint, s, out Stream enStream, out Stream deStream, ref clientPushData, ref postAction);
+                bool handShaken = Clipboard.ShakeHand(ref remoteEndPoint, s, out Stream enStream, out Stream deStream, ref clientPushData, ref postAction, isClient: false);
 
                 if (!handShaken)
                 {

@@ -329,7 +329,7 @@ internal static class Receiver
                             System.Net.Sockets.TcpClient client = Clipboard.ConnectToRemoteClipboardSocket(remoteMachine);
                             bool clientPushData = true;
 
-                            if (Clipboard.ShakeHand(ref remoteMachine, client.Client, out Stream enStream, out Stream deStream, ref clientPushData, ref package.PostAction))
+                            if (Clipboard.ShakeHand(ref remoteMachine, client.Client, out Stream enStream, out Stream deStream, ref clientPushData, ref package.PostAction, isClient: true))
                             {
                                 SocketStuff.SendClipboardData(client.Client, enStream, remoteMachine);
                             }
