@@ -42,7 +42,7 @@ if ($head -ne $remoteHead) {
 
 # This version's section of CHANGELOG.md.
 $changelog = Get-Content (Join-Path $root 'CHANGELOG.md') -Raw
-$match = [regex]::Match($changelog, "(?ms)^## $([regex]::Escape($version))\s*$(.*?)(?=^## |\z)")
+$match = [regex]::Match($changelog, '(?ms)^## ' + [regex]::Escape($version) + '\s*$(.*?)(?=^## |\z)')
 if (-not $match.Success) {
     throw "CHANGELOG.md has no section for $version."
 }
