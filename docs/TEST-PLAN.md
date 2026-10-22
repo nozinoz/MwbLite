@@ -70,6 +70,10 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 4.8 | **Folder (drag):** drag a folder from A onto B's desktop. | The folder appears inside `Desktop\MouseWithoutBorders` on B with all its contents. Drag it again: a second copy arrives as "Folder (2)". | |
 | 4.9 | **Too big for copy:** copy a folder of more than 100 MB on A and move to B. | B shows "… File too big (more than 100 MB in total), please drag and drop it instead!". Dragging the same folder works. | |
 | 4.10 | **Large folder (drag, optional):** drag a folder of several GB from A to B. | It arrives. If B says "still being packed", drop again a little later. | |
+| 4.11 | **Progress:** drag a file of 500 MB or more from A to B. | On both PCs a small window at the bottom right shows the name, "Sending to B" / "Receiving from A", a moving bar and the speed. It doesn't take the keyboard focus. When done it shows "Sent"/"Received", closes after a few seconds, and a notification on B says it arrived. | |
+| 4.12 | **Cancel:** drag the same large file again and press **Cancel** halfway (try once on A, once on B). | Both windows show the copy as cancelled or failed. No partial file is left in `Desktop\MouseWithoutBorders` on B. | |
+| 4.13 | **Preparing:** drag a folder of a few GB. | The window first shows "Preparing (zipping)…" with a moving bar, then the progress. | |
+| 4.14 | **Tray tooltip during a copy:** hover over the tray icon while 4.11 runs. | It shows the file name and percentage. | |
 
 ## 5. One machine sleeps
 
@@ -80,6 +84,19 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 5.3 | If they don't reconnect, press **Win+Ctrl+Alt+R** (Reconnect) on A. | They reconnect. | |
 | 5.4 | Put **A** to sleep, wake it. | Same as 5.2, seen from B. | |
 | 5.5 | Pull B's network (Wi-Fi off) for 30 s, then restore it. | They reconnect without restarting the app. | |
+| 5.6 | **Tray status:** while B is asleep or off the network, hover over A's tray icon and open its menu. | The icon has an amber dot; the tooltip says "1 of 2 PCs connected" (or similar) with B "Not connected"; in the menu B shows *Not connected* and is greyed out. After B is back, the dot goes and B shows *Connected*. | |
+| 5.7 | **Fast detection:** with A and B connected, pull B's network cable or turn its Wi-Fi off, and watch A's tray. | Within about 20–30 s A shows B as not connected (keepalive). Note: _____ s | |
+| 5.8 | **Network change:** move B to another Wi-Fi network on the same LAN, or renew its IP (`ipconfig /renew`). | They reconnect by themselves within about 30 s. | |
+
+## 5b. Check connection and security key
+
+| # | Step | Expected | Result |
+|---|---|---|---|
+| 5b.1 | Settings > **Check connection…** on A with B connected. | Settings, MwbLite running (as a service if service mode is on), Firewall and B all show ✓. **Copy results** puts a text report on the clipboard. | |
+| 5b.2 | Exit MwbLite on B, then run Check connection on A. | B shows ✗ "MwbLite isn't answering on ports…". Start MwbLite on B again. | |
+| 5b.3 | On B: Windows Security > Firewall > Allow an app, untick MwbLite (or block it), then Check connection **on B**. | Firewall shows ✗ and **Fix firewall…** appears. Press it and approve UAC: the check re-runs with Firewall ✓, and A connects to B again. | |
+| 5b.4 | Open `%LOCALAPPDATA%\MwbLite\settings.json` in Notepad (tray > Open config file). | `"securityKey"` reads `"dpapi:…"`, not your key. `settings.json.bak`, if present, also has no plain key. | |
+| 5b.5 | In settings.json replace the `dpapi:…` value with a plain 16+ character key, save, and restart MwbLite. | It works with that key, and the file shows `dpapi:…` again. (Put the original key back afterwards, or pair again.) | |
 
 ## 6. Standalone use
 
@@ -121,7 +138,7 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 - **Logs:**
   - Normal mode: `%LOCALAPPDATA%\MwbLite\logs\`.
   - Service mode: `%ProgramData%\MwbLite\logs\` (open an admin prompt to read them).
-- **No connection:**
+- **No connection:** run Settings > **Check connection…** on both PCs first. Then:
   - Check the firewall rule or prompt, and that the network profile is Private.
   - Check `tcpPort` is the same on all machines.
   - Check names in `machines` match `hostname` exactly.

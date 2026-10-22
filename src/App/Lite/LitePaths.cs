@@ -46,6 +46,16 @@ namespace MouseWithoutBorders.Lite
 
         internal static string LogDir => Path.Combine(ConfigDir, "logs");
 
+        /// <summary>
+        /// Live connection/transfer status (no secrets) for the Settings window. The SYSTEM instance writes it in a
+        /// subfolder users may read; the rest of %ProgramData%\MwbLite stays admin-only.
+        /// </summary>
+        internal static string StatusFile => IsSystem ? ServiceStatusFile : UserStatusFile;
+
+        internal static string UserStatusFile => Path.Combine(UserDir, "status.json");
+
+        internal static string ServiceStatusFile => Path.Combine(ServiceDir, "status", "status.json");
+
         internal static string ExePath => Environment.ProcessPath;
 
         internal static string ExeDir => Path.GetDirectoryName(Environment.ProcessPath);
@@ -74,9 +84,24 @@ namespace MouseWithoutBorders.Lite
         /// Creates (if needed) a directory that only SYSTEM and Administrators can access, and resets
         /// its ACL to exactly that (inheritance from %ProgramData% removed).
         /// </summary>
-        internal static void EnsureProtectedDirectory(string path)
+        internal static void EnsureProtectedDirectory(string path) => EnsureDirectory(path, usersCanRead: false);
+
+        /// <summary>As <see cref="EnsureProtectedDirectory"/>, plus read access for Users (for the status file).</summary>
+        internal static void EnsureReadableDirectory(string path) => EnsureDirectory(path, usersCanRead: true);
+
+        private static void EnsureDirectory(string path, bool usersCanRead)
         {
             var security = new DirectorySecurity();
+            if (usersCanRead)
+            {
+                security.AddAccessRule(new FileSystemAccessRule(
+                    new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
+                    FileSystemRights.ReadAndExecute,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow));
+            }
+
             security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
             foreach (var sid in new[] { WellKnownSidType.LocalSystemSid, WellKnownSidType.BuiltinAdministratorsSid })
             {

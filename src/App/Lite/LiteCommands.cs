@@ -25,7 +25,7 @@ namespace MouseWithoutBorders.Lite
     internal static class LiteCommands
     {
         private const string MainExeName = LitePaths.AppName + ".exe";
-        private const string FirewallRuleName = LitePaths.AppName;
+        internal const string FirewallRuleName = LitePaths.AppName;
         private const int ErrorCancelled = 1223;
 
         private static readonly string Usage =
@@ -107,6 +107,7 @@ namespace MouseWithoutBorders.Lite
                     case "--install-elevated":
                     case "--apply-config-elevated":
                     case "--uninstall-elevated":
+                    case "--repair-firewall-elevated":
                         LitePaths.EnsureProtectedDirectory(LitePaths.ServiceDir);
                         LiteLog.Initialize(Path.Combine(LitePaths.ServiceDir, "logs"), "install");
                         return RunElevatedCommand(cmd, ParseOptions(args));
@@ -149,7 +150,7 @@ namespace MouseWithoutBorders.Lite
                 return 1;
             }
 
-            int rc = Elevate("--install-elevated", userSettings);
+            int rc = ElevateWithStagedConfig("--install-elevated", cfg);
             if (rc != 0)
             {
                 Show(rc == ErrorCancelled ? "Install cancelled." : "Install failed (exit code " + rc + "). See " + Path.Combine(LitePaths.ServiceDir, "logs", "install.log"), MessageBoxIcon.Error);
@@ -181,13 +182,37 @@ namespace MouseWithoutBorders.Lite
 
             LiteStartup.Sync(cfg.StartWithWindows, File.Exists(Path.Combine(LitePaths.InstallDir, MainExeName)) ? Path.Combine(LitePaths.InstallDir, MainExeName) : LitePaths.ExePath);
 
-            int rc = Elevate("--apply-config-elevated", userSettings);
+            int rc = ElevateWithStagedConfig("--apply-config-elevated", cfg);
             if (rc != 0 && rc != ErrorCancelled)
             {
                 Show("Applying settings failed (exit code " + rc + ").", MessageBoxIcon.Error);
             }
 
             return rc;
+        }
+
+        // The user's settings.json has the key encrypted for this user only, and the elevated process may be another
+        // admin account. So hand it a copy whose key is encrypted for this PC (LocalMachine scope), in the user's own
+        // temp folder, and delete it afterwards.
+        private static int ElevateWithStagedConfig(string elevatedCommand, LiteConfig cfg)
+        {
+            string staged = Path.Combine(Path.GetTempPath(), "MwbLite-apply-" + Guid.NewGuid().ToString("N") + ".json");
+            try
+            {
+                cfg.Save(staged, machineScope: true);
+                return Elevate(elevatedCommand, staged);
+            }
+            finally
+            {
+                try
+                {
+                    File.Delete(staged);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    LiteLog.Write(nameof(LiteCommands), "Cannot delete " + staged + ": " + e.Message);
+                }
+            }
         }
 
         private static int Uninstall()
@@ -242,6 +267,19 @@ namespace MouseWithoutBorders.Lite
                         return 0;
                     }
 
+                // Settings > Check connection > Fix firewall: replace every inbound rule for MwbLite.exe (including
+                // the Block rules Windows adds when its firewall prompt is dismissed) with MwbLite's own rules.
+                case "--repair-firewall-elevated":
+                    {
+                        int port = opts.TryGetValue("--tcp-port", out var tp) && int.TryParse(tp, out int n) && n is > 1023 and < 65535 ? n : 15100;
+                        string installed = Path.Combine(LitePaths.InstallDir, MainExeName);
+                        string exe = File.Exists(installed) ? installed : LitePaths.ExePath;
+                        RunNetsh($"advfirewall firewall delete rule name=all dir=in program=\"{exe}\"");
+                        SetFirewallRule(exe, port);
+                        LiteLog.Write(nameof(LiteCommands), "Firewall rules repaired for " + exe);
+                        return 0;
+                    }
+
                 case "--uninstall-elevated":
                     {
                         _ = LiteServiceControl.Unregister();
@@ -268,9 +306,7 @@ namespace MouseWithoutBorders.Lite
                 ?? throw new InvalidDataException(string.Join("\r\n", errors));
 
             LitePaths.EnsureProtectedDirectory(LitePaths.ServiceDir);
-            string tmp = LitePaths.ServiceSettingsFile + ".tmp";
-            File.Copy(userSettings, tmp, overwrite: true);
-            File.Move(tmp, LitePaths.ServiceSettingsFile, overwrite: true);
+            cfg.Save(LitePaths.ServiceSettingsFile, machineScope: true); // key encrypted for this PC (SYSTEM reads it)
             LitePaths.EnsureProtectedDirectory(LitePaths.ServiceDir); // re-apply inherited ACL to the new file
             LiteLog.Write(nameof(LiteCommands), "Copied " + userSettings + " to " + LitePaths.ServiceSettingsFile);
             return cfg;
@@ -286,9 +322,23 @@ namespace MouseWithoutBorders.Lite
             }
 
             Directory.CreateDirectory(dst); // inherits the admin-only-write ACL of Program Files
-            foreach (string name in new[] { MainExeName, LitePaths.HelperExeName })
+            if (File.Exists(Path.Combine(src, "MwbLite.dll")))
             {
-                File.Copy(Path.Combine(src, name), Path.Combine(dst, name), overwrite: true);
+                // Framework-dependent build (a folder of files): copy the whole folder.
+                foreach (string file in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
+                {
+                    string target = Path.Combine(dst, Path.GetRelativePath(src, file));
+                    Directory.CreateDirectory(Path.GetDirectoryName(target));
+                    File.Copy(file, target, overwrite: true);
+                }
+            }
+            else
+            {
+                // Portable single-file build: the two exes carry everything.
+                foreach (string name in new[] { MainExeName, LitePaths.HelperExeName })
+                {
+                    File.Copy(Path.Combine(src, name), Path.Combine(dst, name), overwrite: true);
+                }
             }
 
             foreach (string extra in new[] { "LICENSE", "NOTICE.md", "README.md" })
@@ -405,9 +455,14 @@ namespace MouseWithoutBorders.Lite
 
         // ---- helpers ------------------------------------------------------------------------
 
-        private static int Elevate(string elevatedCommand, string userSettings)
+        /// <summary>Recreates MwbLite's firewall rules (UAC prompt). Returns 0 on success, 1223 if cancelled.</summary>
+        internal static int RepairFirewall(int tcpPort) =>
+            Elevate("--repair-firewall-elevated", null, "--tcp-port", tcpPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        private static int Elevate(string elevatedCommand, string userSettings, params string[] extra)
         {
             var args = new List<string> { elevatedCommand, "--parent-pid", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+            args.AddRange(extra);
             if (userSettings != null)
             {
                 // Pass the invoking user's file and SID explicitly: the elevated process may run as a

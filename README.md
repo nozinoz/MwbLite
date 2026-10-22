@@ -26,7 +26,8 @@ That single command (a wrapper for `powershell -NoProfile -ExecutionPolicy Bypas
    Microsoft-signed `dotnet-install.ps1` is checked for a valid signature before it runs.
 2. **Runs the unit tests.** These are upstream's encryption, key-codec, logger and received-file tests plus the
    config tests. Pass `-SkipTests` to skip them.
-3. **Publishes the app** twice: as a shared-runtime folder for the installer, and as portable single-file exes.
+3. **Publishes the app** twice: as a small folder that runs on the shared .NET 10 Desktop Runtime (for the
+   installer), and as portable single-file exes that carry their own runtime.
 4. **Builds the installer** with the [WiX Toolset](https://wixtoolset.org) 5, which comes from NuGet (MS-RL
    licence). Pass `-SkipInstaller` to skip it.
 
@@ -34,8 +35,8 @@ Output in `dist\`:
 
 | File | Size | Use |
 |---|---|---|
-| `MwbLite-Setup-<version>.exe` | ~60 MB | **The installer.** Double-click it on each PC. |
-| `MwbLite-<version>-x64.msi` | ~60 MB | The same package as a plain MSI, for silent or scripted installs: `msiexec /i MwbLite-<version>-x64.msi /qn` |
+| `MwbLite-Setup-<version>.exe` | ~8 MB | **The installer.** Double-click it on each PC. Installs the .NET Desktop Runtime first if the PC needs it. |
+| `MwbLite-<version>-x64.msi` | ~7 MB | The app package alone, for silent or scripted installs on PCs that already have the .NET 10 Desktop Runtime: `msiexec /i MwbLite-<version>-x64.msi /qn` |
 | `portable\MwbLite.exe`, `portable\MwbLite.Helper.exe` | ~177 MB each | Run without installing (see [Portable use](#portable-use-no-installer)). |
 | `SHA256SUMS.txt` | | Hashes of all of the above. |
 
@@ -45,9 +46,14 @@ The build keeps everything inside the repo folder:
 - The SDK's CLI state goes to `.dotnet\home`.
 - .NET CLI telemetry is switched off.
 
-Each portable exe carries its own .NET runtime, so they are large. The installer shares one runtime between both
-programs, so it's about 180 MB once installed. Neither is compressed in memory: as built, MwbLite uses about
-27 MB + 15 MB of private memory, compared with about 32 MB + 17 MB for PowerToys' MWB.
+The installed app uses the **shared .NET 10 Desktop Runtime** (about 31 MB of its own files). Setup checks for
+the runtime version pinned in `installer\DotNetRuntime.props`; if it's missing or older, Setup downloads
+Microsoft's installer (about 57 MB), checks its SHA-512, and runs it. Windows Update then keeps the runtime
+patched, and uninstalling MwbLite leaves it in place for other apps. To move to a newer .NET 10 patch, run
+`tools\update-runtime-pin.ps1` and build.
+
+Each portable exe carries its own .NET runtime, so they are large. Neither build is compressed in memory: as
+built, MwbLite uses about 27 MB + 15 MB of private memory, compared with about 32 MB + 17 MB for PowerToys' MWB.
 
 ## Install
 
@@ -59,6 +65,8 @@ programs, so it's about 180 MB once installed. Neither is compressed in memory: 
 Run `MwbLite-Setup-<version>.exe` on each PC: accept the licence, press **Install**, approve the UAC prompt,
 then **Launch**. Setup:
 
+- installs Microsoft's **.NET 10 Desktop Runtime** if the PC doesn't have a recent enough one (needs internet
+  the first time);
 - installs to `C:\Program Files\MwbLite` and adds an entry in **Settings > Apps > Installed apps** (Uninstall
   is there);
 - adds **MwbLite** and **MwbLite Settings** to the Start menu;
@@ -138,7 +146,12 @@ commands do nothing on a PC where Setup installed MwbLite.
 - **Open config file.** Opens settings.json in Notepad.
 - **Reload config.** Re-reads settings.json after you edit it by hand.
 - **Exit.**
-- **Machines.** Below Exit, upstream's list of connected machines (click one to switch to it).
+- **Your PCs.** Below Exit, every PC in the layout with its state: *This PC*, *Connected*, *Connecting…*, *Not
+  connected* or *Security key doesn't match*. Click a connected PC to move the mouse and keyboard there.
+
+Hover over the icon for a summary ("MwbLite – 2 of 3 PCs connected", one line per PC, or the file being copied
+and how far it has got). An **amber dot** on the icon means a PC in the layout isn't connected. If a PC is
+rejected because its security key is different, a notification says so once.
 
 ### Settings window
 
@@ -160,7 +173,9 @@ Left-click the tray icon, or choose **Settings…**, to edit settings.json witho
   - This PC is highlighted. Save, and the other connected PCs take the new arrangement and save it too.
 
   ![Two rows](docs/layout-grid.png)
-- **Options.** Clipboard, file transfer, start with Windows, service mode.
+- **Options.** Clipboard, file transfer, the file copy progress window, start with Windows, service mode.
+- **Check connection…** runs a quick check and explains each problem in plain words (see
+  [Check connection](#check-connection)).
 - **Show advanced settings.** Port, Easy Mouse, hotkeys, name-to-IP mappings and the less common switches.
 - **Save & apply** validates first, using the same checks as Reload config. If something is wrong, the window
   stays open and the problem is shown in red. Otherwise it writes settings.json and applies it:
@@ -217,6 +232,27 @@ Without Borders would receive the zip itself.
 uncompressed, for speed. Copy and paste compresses it.
 
 All transfers use the same encrypted connection as everything else.
+
+**Progress.** A small window at the bottom right shows each copy: the name, which PC it's going to or coming
+from, a progress bar, the speed, and **Cancel**. It appears for anything over 2 MB or that takes more than a
+second, never takes the keyboard focus, and closes a few seconds after the copy finishes. A notification says
+when a copy has arrived or failed. Cancel works on either PC; the receiving PC deletes the partial file. Turn
+the window and notifications off with **Show file copy progress** in Settings.
+
+## Check connection
+
+Settings > **Check connection…** tests, in order:
+
+1. **Settings:** the file is valid, there's a security key, and other PCs are in the layout.
+2. **MwbLite running:** whether it's running on this PC, and whether as a service.
+3. **Firewall:** whether Windows Firewall lets other PCs reach MwbLite on the current network (it reads the rules;
+   no admin needed). It also finds the *Block* rules Windows adds when someone dismisses its firewall prompt.
+   **Fix firewall…** (one UAC prompt) replaces every inbound rule for MwbLite with MwbLite's own allow rules.
+4. **Each PC:** connected now? If not: can its name be found, is it on this subnet, does MwbLite answer on its
+   two ports, and does it have a different security key?
+
+**Copy results** puts the report on the clipboard. Run it on both PCs when two of them won't connect.
+
 ## Configuration: `%LOCALAPPDATA%\MwbLite\settings.json`
 
 The file is JSON. `//` comments and trailing commas are allowed. Three things write it:
@@ -226,6 +262,11 @@ The file is JSON. `//` comments and trailing commas are allowed. Three things wr
 - A layout change received from another of your PCs (machines, one row/two rows, wrap) is saved into it.
 
 Each write keeps the previous file as `settings.json.bak`.
+
+**The security key is stored encrypted** (`"securityKey": "dpapi:…"`) with Windows' own data protection
+(DPAPI): only your Windows account on this PC can read it, so a copied or backed-up settings.json doesn't give it
+away. MwbLite decrypts it in memory. A plain-text key still works: settings files from older versions, or a key
+you type into the file by hand, are encrypted the next time MwbLite starts (comments and formatting are kept).
 
 Values MWB changes while running (machine IDs, learned machine pool, last cursor position) go to `state.json`
 next to it.
@@ -237,6 +278,7 @@ next to it.
   "layout": { "oneRow": true, "wrapMouse": true },
   "shareClipboard": true,
   "transferFile": true,
+  "showTransferProgress": true,
   "startWithWindows": true,
   "useService": true,
   "advanced": {
@@ -266,12 +308,13 @@ next to it.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `securityKey` | random | Pairing key. At least 16 characters; spaces are ignored. **Must be identical on every PC.** MWB derives its AES key from it. |
+| `securityKey` | random | Pairing key, stored encrypted (`dpapi:…`). At least 16 characters; spaces are ignored. **Must be identical on every PC.** MWB derives its AES key from it. To set it by hand, replace the whole value with the plain key. |
 | `machines` | this PC | Up to 4 computer names (`hostname`), in screen order. **Keep this identical on every PC.** Use `""` for an empty slot. If this PC is missing, MWB puts it in the first empty slot. |
 | `layout.oneRow` | `true` | `true`: machines left-to-right. `false`: 2×2 grid, row by row (`[0][1]` over `[2][3]`). |
 | `layout.wrapMouse` | `true` | Leaving the last screen wraps the cursor to the first. |
 | `shareClipboard` | `true` | Sync clipboard text and images. |
 | `transferFile` | `true` | Copy or drag files between PCs, up to 100 MB, single file. Requires `shareClipboard`. Received files go to a `MouseWithoutBorders` folder on the desktop. |
+| `showTransferProgress` | `true` | Show the file copy progress window (with Cancel) and a notification when a copy finishes or fails. |
 | `startWithWindows` | `false` | Adds or removes a per-user `HKCU\…\Run` entry. **Required for service mode** to start at logon. |
 | `useService` | `false` | Use MwbLite.Service, so MWB controls the lock screen, Ctrl+Alt+Del and UAC prompts. Needs `--install`. Takes effect after a restart. |
 | `advanced.tcpPort` | `15100` | MWB uses `tcpPort` (clipboard and files) and `tcpPort+1` (input and control). Must match on every PC. Takes effect after a restart. |
@@ -292,6 +335,8 @@ file and reload. `tcpPort` and `useService` changes need a restart: Exit, then s
 |---|---|
 | `%LOCALAPPDATA%\MwbLite\settings.json` | Your configuration. |
 | `%LOCALAPPDATA%\MwbLite\state.json` | Runtime values (normal mode). |
+| `%LOCALAPPDATA%\MwbLite\status.json` | Live connection and copy status, read by Check connection (normal mode). No secrets. |
+| `%ProgramData%\MwbLite\status\status.json` | The same, written by the service-mode instance. The only part of `%ProgramData%\MwbLite` that users can read. |
 | `%LOCALAPPDATA%\MwbLite\logs\` | `mwblite.log`, `helper.log`, `commands.log` (4 MB cap each, one `.1` rollover). |
 | `%ProgramData%\MwbLite\` | Service mode: protected copy of settings.json, state.json, and logs (`mwblite-system.log`, `service.log`, `install.log`). SYSTEM and Administrators only. |
 | `C:\Program Files\MwbLite\` | Installed binaries (`--install`). |
@@ -319,6 +364,11 @@ TCP `tcpPort`+1 (input and control) and `tcpPort` (clipboard and files). Each co
 from the security key (PBKDF2-SHA512, 100,000 iterations, fresh random salt and IV). A challenge-response
 handshake proves both sides have the key; a wrong key is dropped after 10 bad packets. The key itself never
 crosses the network after pairing.
+
+**Staying connected.** MwbLite reconnects by itself when a PC wakes from sleep, when its network changes (new
+Wi-Fi, new IP address, a cable plugged in) and when a peer vanishes. Each connection uses TCP keepalive, so a PC
+that went to sleep or lost its network is noticed in about 20 seconds; upstream could take many minutes. The
+manual **Reconnect** hotkey (Win+Ctrl+Alt+R) still works.
 
 **Layout** (machine order, one row or two, wrap) is shared. A change made in Settings on one PC is sent to the
 connected PCs, and each saves it to its own settings.json. MwbLite also pre-loads the configured names into MWB's
@@ -350,7 +400,7 @@ No PowerToys DLLs or projects are referenced. The build contains no C++.
 **Engine files left byte-for-byte unchanged:**
 
 - **Crypto and keys:** `Core/Encryption.cs`, `Class/PairingKeyCodec.cs`, `Class/PassthroughPairingKeyCodec.cs`, `Class/DpapiPairingKeyCodec.cs`.
-- **Network and protocol:** `Class/TcpServer.cs`, `Core/Receiver.cs`, `Core/Package*.cs`. (`Class/SocketStuff.cs` has one small edit, listed below; the bytes on the wire are unchanged.)
+- **Network and protocol:** `Class/TcpServer.cs`, `Core/Package*.cs`. (`Class/SocketStuff.cs`, `Core/Clipboard.cs` and `Core/Receiver.cs` have small edits, listed below; the bytes on the wire are unchanged.)
 - **Input injection:** `Class/InputSimulation.cs`.
 - **Process launch and native calls:** `Core/Launch.cs`, `Core/WinAPI.cs`, `Class/NativeMethods.cs`.
 
@@ -361,11 +411,15 @@ No PowerToys DLLs or projects are referenced. The build contains no C++.
 | `Class/InputHook.cs` | The module handle passed to `SetWindowsHookEx` is now `GetModuleHandle(NULL)` instead of `Marshal.GetHINSTANCE(module)`. | In a single-file exe `GetHINSTANCE` returns -1, so the keyboard and mouse hooks failed with error 126. Verified: they now install. |
 | `Core/Clipboard.cs`, `Core/DragDrop.cs` | One telemetry line removed from each. | No telemetry. |
 | `Class/SocketStuff.cs` (send step), `Core/Clipboard.cs` (receive step), `Helper/FormHelper.cs` (copy and drag) | A selection with folders or several files is announced as a bundle. The sender asks `Lite/LiteFileBundle` for the bundle's zip, and the receiver unpacks it. A single file takes the original path. | Copying folders and several files at once. MWB still transfers exactly one file, with the same header and data. |
+| `Class/SocketStuff.cs` (file send loop), `Core/Clipboard.cs` (file receive loop), `Core/Receiver.cs` (passes the peer's name) | Each loop reports its byte count to `Lite/LiteTransfers`. The send counter is a `long` (it was an `int`, which overflowed above 2 GB on drag and drop). | The progress window, Cancel and the copy notifications. Cancel closes the transfer's socket, which both loops already handled as a failed copy. |
+| `Class/SocketStuff.cs` (`MainTCPRoutine`, `StartNewTcpClientThread`), `Exceptions/ExpectedSocketException.cs` | TCP keepalive on each connection (10 s idle, 3 s interval, 3 probes). The connect-retry window starts per connection attempt. A timed-out or aborted connection (WSAETIMEDOUT, WSAECONNABORTED) triggers a redial like a reset one did. | A sleeping or vanished PC was only noticed after many minutes, and connection attempts started later than 30 s after the sockets opened got a single try. |
+| `Core/InitAndCleanup.cs` | On suspend and resume the sockets are closed and reopened. `Lite/LiteReconnect` does the same when the PC's IP addresses change. | Upstream only reacted when the network disappeared entirely, so waking a laptop or changing Wi-Fi left dead connections. |
+| `Core/Common.cs` | `ShowToolTip` passes its icon on (it was dropped, so every balloon showed the Info icon). | Warnings and errors look like warnings and errors. |
 | `Core/Helper.cs`, `Helper/FormHelper.Designer.cs`, `Class/IClipboardHelper.cs` | Helper process and window renamed to `MwbLite.Helper` / "MwbLite Helper". Local clipboard pipe renamed to `MwbLite/ClipboardHelper`. `EventLogger` now writes to the log file. | These names were shared with PowerToys MWB. With both installed, MwbLite found PowerToys' helper window, and the pipe could connect to the wrong app. They are local IPC between MwbLite's own two processes, not the network protocol. |
 
 The other edited files are the PowerToys seams: `Class/Program.cs`, `Class/Setting.cs` (same members, new backing
 store), `Class/IpcChannel.cs`, `Core/Logger.cs`, `Core/MachineStuff.cs` (`ShowMachineMatrix`), `Form/frmScreen.cs`
-(tray menu), `Form/frmMatrix.cs` (one telemetry line), `Helper/Program.cs`, `Service/*.cs`. New code lives in
+(tray menu, PC list with states, tooltip, amber dot), `Form/frmMatrix.cs` (one telemetry line), `Helper/Program.cs`, `Service/*.cs`. New code lives in
 `src/App/Lite/`.
 
 ### Stubs (fixed values that replace removed features)
@@ -397,8 +451,12 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
   desktop and can click "Yes" on UAC prompts. If it trusted a key from a file the user (or malware running as the
   user) can edit, that would be a UAC bypass. So it reads `%ProgramData%\MwbLite\settings.json`, which is
   ACL-restricted to SYSTEM and Administrators, and changes require UAC approval (`--apply-config`).
-  - **Where this differs from upstream:** PowerToys kept the service key DPAPI-encrypted inside the user's
-    settings file. MwbLite keeps it as plain text in a folder only admins can access.
+  - **The key is encrypted at rest** with DPAPI: for your account in your settings.json, and for the PC
+    (LocalMachine scope) in the service's copy. Any program on the PC could decrypt the LocalMachine scope, so
+    for the service copy the admin-only folder is what protects it; DPAPI means the file is useless if copied
+    elsewhere. (PowerToys kept the service key DPAPI-encrypted inside the user's settings file.)
+  - `--apply-config` hands the elevated process a temporary copy of your settings with the key encrypted for
+    this PC, in your own temp folder, and deletes it straight after.
 - **No editor or settings window runs as SYSTEM.** The SYSTEM tray's "Settings…", "Open config file" and "Reload
   config" start `MwbLite.exe --settings` / `--open-config` / `--apply-config` with **your** token.
 - **Install location:** the service binary lives in `C:\Program Files\MwbLite` (admin-only write), never in a

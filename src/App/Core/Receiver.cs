@@ -331,7 +331,7 @@ internal static class Receiver
 
                             if (Clipboard.ShakeHand(ref remoteMachine, client.Client, out Stream enStream, out Stream deStream, ref clientPushData, ref package.PostAction))
                             {
-                                SocketStuff.SendClipboardData(client.Client, enStream);
+                                SocketStuff.SendClipboardData(client.Client, enStream, remoteMachine);
                             }
                         }
                         catch (Exception e)

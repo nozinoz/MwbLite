@@ -35,8 +35,17 @@ namespace MouseWithoutBorders.Lite
             Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
         };
 
-        /// <summary>Pairing key. Must be identical on every machine; at least 16 characters (spaces ignored).</summary>
+        /// <summary>
+        /// Pairing key. Must be identical on every machine; at least 16 characters (spaces ignored). Plain text in
+        /// memory; encrypted with DPAPI in the file (see LiteKeyProtection).
+        /// </summary>
         public string SecurityKey { get; set; } = string.Empty;
+
+        /// <summary>The file's key was encrypted for another Windows account or PC and couldn't be read.</summary>
+        internal bool KeyUnreadable { get; private set; }
+
+        /// <summary>The file held the key in plain text (older version, or typed by hand).</summary>
+        internal bool KeyWasPlain { get; private set; }
 
         /// <summary>
         /// Up to 4 machine (computer) names. The order is the screen layout: left-to-right in one row, or a
@@ -50,6 +59,9 @@ namespace MouseWithoutBorders.Lite
         public bool ShareClipboard { get; set; } = true;
 
         public bool TransferFile { get; set; } = true;
+
+        /// <summary>Show a progress window (with Cancel) for file copies and a notification when they finish.</summary>
+        public bool ShowTransferProgress { get; set; } = true;
 
         public bool StartWithWindows { get; set; }
 
@@ -193,6 +205,13 @@ namespace MouseWithoutBorders.Lite
                 return null;
             }
 
+            cfg.KeyWasPlain = !LiteKeyProtection.IsProtected(cfg.SecurityKey) && !string.IsNullOrWhiteSpace(cfg.SecurityKey);
+            if (!LiteKeyProtection.TryUnprotect(cfg.SecurityKey, out string key))
+            {
+                cfg.KeyUnreadable = true;
+            }
+
+            cfg.SecurityKey = key;
             cfg.Normalize();
             return cfg;
         }
@@ -215,7 +234,11 @@ namespace MouseWithoutBorders.Lite
             var errors = new List<string>();
             warnings = new List<string>();
 
-            if (!Encryption.IsKeyValid(SecurityKey, out string keyError))
+            if (KeyUnreadable)
+            {
+                errors.Add("securityKey: it was encrypted by another Windows account or PC, so this one can't read it. Pair this PC again (Settings > Join…), or type the key under Advanced.");
+            }
+            else if (!Encryption.IsKeyValid(SecurityKey, out string keyError))
             {
                 errors.Add("securityKey: " + keyError);
             }
@@ -275,18 +298,101 @@ namespace MouseWithoutBorders.Lite
         /// Writes this config (used by the Settings window only; the engine never writes settings.json).
         /// The previous file is kept as settings.json.bak; the write is atomic.
         /// </summary>
-        internal void Save(string path)
+        /// <param name="path">Target file.</param>
+        /// <param name="machineScope">Encrypt the key for the whole PC (service copy) instead of the current user. Default: by location.</param>
+        internal void Save(string path, bool? machineScope = null)
         {
+            bool machine = machineScope ?? IsServiceFile(path);
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             if (File.Exists(path))
             {
-                File.Copy(path, path + ".bak", overwrite: true);
+                BackUp(path, machine);
             }
 
             string tmp = path + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(this, JsonOptions), new UTF8Encoding(false));
+            File.WriteAllText(tmp, SerializeForFile(machine), new UTF8Encoding(false));
             File.Move(tmp, path, overwrite: true);
         }
+
+        /// <summary>
+        /// Encrypts a plain-text key in an existing file and its .bak, changing nothing else (comments and formatting
+        /// stay). Returns true if the file changed.
+        /// </summary>
+        internal static bool ProtectPlainKeyInFile(string path)
+        {
+            bool machine = IsServiceFile(path);
+            bool changed = false;
+            foreach (string file in new[] { path, path + ".bak" })
+            {
+                if (File.Exists(file) && ProtectedText(file, machine) is string text)
+                {
+                    string tmp = file + ".tmp";
+                    File.WriteAllText(tmp, text, new UTF8Encoding(false));
+                    File.Move(tmp, file, overwrite: true);
+                    LiteLog.Write(nameof(LiteConfig), "Encrypted the security key in " + file);
+                    changed |= file == path;
+                }
+            }
+
+            return changed;
+        }
+
+        /// <summary>The file's text with a plain-text key replaced by its encrypted form; null if there is nothing to replace.</summary>
+        private static string ProtectedText(string path, bool machineScope)
+        {
+            var cfg = TryParse(path, out _);
+            if (cfg == null || !cfg.KeyWasPlain || cfg.KeyUnreadable)
+            {
+                return null;
+            }
+
+            byte[] bytes = Encoding.UTF8.GetBytes(File.ReadAllText(path, Encoding.UTF8));
+            var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.PropertyName && reader.CurrentDepth == 1 &&
+                    string.Equals(reader.GetString(), "securityKey", StringComparison.OrdinalIgnoreCase) &&
+                    reader.Read() && reader.TokenType == JsonTokenType.String)
+                {
+                    int start = (int)reader.TokenStartIndex;
+                    int end = (int)reader.BytesConsumed;
+                    string value = JsonSerializer.Serialize(LiteKeyProtection.Protect(cfg.SecurityKey, machineScope));
+                    return Encoding.UTF8.GetString(bytes, 0, start) + value + Encoding.UTF8.GetString(bytes, end, bytes.Length - end);
+                }
+            }
+
+            return null;
+        }
+
+        private string SerializeForFile(bool machineScope)
+        {
+            string plain = SecurityKey;
+            try
+            {
+                SecurityKey = LiteKeyProtection.Protect(plain, machineScope);
+                return JsonSerializer.Serialize(this, JsonOptions);
+            }
+            finally
+            {
+                SecurityKey = plain;
+            }
+        }
+
+        // Keeps the previous file as .bak (comments and all), but never with the key in plain text.
+        private static void BackUp(string path, bool machineScope)
+        {
+            if (ProtectedText(path, machineScope) is string text)
+            {
+                File.WriteAllText(path + ".bak", text, new UTF8Encoding(false));
+            }
+            else
+            {
+                File.Copy(path, path + ".bak", overwrite: true);
+            }
+        }
+
+        private static bool IsServiceFile(string path) =>
+            Path.GetFullPath(path).StartsWith(Path.GetFullPath(LitePaths.ServiceDir) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>True if the file contains // or /* */ comments (they are lost when the Settings window saves).</summary>
         internal static bool HasComments(string path)
@@ -324,7 +430,7 @@ namespace MouseWithoutBorders.Lite
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            string json = JsonSerializer.Serialize(CreateDefault(), JsonOptions);
+            string json = CreateDefault().SerializeForFile(IsServiceFile(path));
             using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
             {

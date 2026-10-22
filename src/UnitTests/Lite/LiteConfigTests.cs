@@ -139,7 +139,14 @@ public sealed class LiteConfigTests
         cfg.Normalize();
         cfg.Save(path);
 
-        Assert.AreEqual(original, File.ReadAllText(path + ".bak"));
+        // The backup keeps the old file (comments too) but with the key encrypted.
+        string backup = File.ReadAllText(path + ".bak");
+        StringAssert.Contains(backup, "// hand-written comment");
+        StringAssert.Contains(backup, "\"securityKey\": \"dpapi:");
+        Assert.IsFalse(backup.Contains("0123456789abcdef", StringComparison.Ordinal));
+        Assert.AreEqual(original.Length, backup.Length - backup.Split('"')[3].Length + "0123456789abcdef".Length, "only the key value changes");
+        Assert.AreEqual("0123456789abcdef", LiteConfig.TryParse(path + ".bak", out _)!.SecurityKey);
+        Assert.IsFalse(File.ReadAllText(path).Contains("0123456789abcdef", StringComparison.Ordinal), "the saved file holds the key encrypted");
         Assert.IsFalse(LiteConfig.HasComments(path));
         Assert.IsFalse(File.Exists(path + ".tmp"));
 
@@ -212,5 +219,66 @@ public sealed class LiteConfigTests
         Assert.AreNotEqual("tooshort", settings.MyKey);
         Assert.IsTrue(Encryption.IsKeyValid(settings.MyKey, out _));
         Assert.AreEqual("{ \"securityKey\": \"tooshort\" }", File.ReadAllText(settingsFile));
+    }
+
+    [TestMethod]
+    public void KeyIsEncryptedOnDiskAndPlainInMemory()
+    {
+        string path = Path.Combine(dir, "settings.json");
+        Assert.IsTrue(LiteConfig.WriteDefaultIfMissing(path));
+        string text = File.ReadAllText(path);
+        StringAssert.Contains(text, "\"securityKey\": \"dpapi:");
+
+        var cfg = LiteConfig.TryLoad(path, out var errors, out _)!;
+        Assert.AreEqual(0, errors.Count, string.Join("; ", errors));
+        Assert.IsTrue(Encryption.IsKeyValid(cfg.SecurityKey, out _));
+        Assert.IsFalse(text.Contains(cfg.SecurityKey, StringComparison.Ordinal));
+
+        // Clone and the Settings window's change detection work on the plain key.
+        Assert.AreEqual(cfg.SecurityKey, cfg.Clone().SecurityKey);
+
+        cfg.Save(path);
+        Assert.AreEqual(cfg.SecurityKey, LiteConfig.TryLoad(path, out _, out _)!.SecurityKey);
+
+        cfg.Save(path, machineScope: true); // service copy: readable by any account on this PC
+        Assert.AreEqual(cfg.SecurityKey, LiteConfig.TryLoad(path, out _, out _)!.SecurityKey);
+    }
+
+    [TestMethod]
+    public void PlainKeyFromAnOlderVersionIsEncryptedInPlaceKeepingComments()
+    {
+        string path = Write("""
+            {
+              // my PCs
+              "securityKey": "0123 4567 89ab cdef",
+              "machines": ["PC1", "PC2"]
+            }
+            """);
+        File.WriteAllText(path + ".bak", "{ \"securityKey\": \"fedcba9876543210\" }");
+
+        Assert.IsTrue(LiteConfig.ProtectPlainKeyInFile(path));
+        string text = File.ReadAllText(path);
+        StringAssert.Contains(text, "// my PCs");
+        StringAssert.Contains(text, "\"machines\": [\"PC1\", \"PC2\"]");
+        Assert.IsFalse(text.Contains("0123", StringComparison.Ordinal));
+        Assert.AreEqual("0123456789abcdef", LiteConfig.TryLoad(path, out _, out _)!.SecurityKey);
+
+        Assert.IsFalse(File.ReadAllText(path + ".bak").Contains("fedcba", StringComparison.Ordinal), "the backup is encrypted too");
+        Assert.AreEqual("fedcba9876543210", LiteConfig.TryParse(path + ".bak", out _)!.SecurityKey);
+
+        Assert.IsFalse(LiteConfig.ProtectPlainKeyInFile(path), "already encrypted: nothing to do");
+    }
+
+    [TestMethod]
+    public void KeyEncryptedElsewhereIsReportedNotUsed()
+    {
+        string path = Write("{ \"securityKey\": \"dpapi:AQIDBAUGBwgJ\", \"machines\": [\"PC1\"] }");
+
+        Assert.IsNull(LiteConfig.TryLoad(path, out var errors, out _));
+        StringAssert.Contains(errors[0], "another Windows account or PC");
+
+        var parsed = LiteConfig.TryParse(path, out _)!; // the Settings window still opens
+        Assert.AreEqual(string.Empty, parsed.SecurityKey);
+        Assert.IsFalse(LiteConfig.ProtectPlainKeyInFile(path));
     }
 }

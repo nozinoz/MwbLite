@@ -1162,6 +1162,10 @@ namespace MouseWithoutBorders.Class
 
                     long timeoutLeft;
 
+                    // MwbLite: the retry window starts when this thread does, not when SocketStuff was created
+                    // (threads started later used to get a single attempt).
+                    long deadline = Math.Max(connectTimeout, Common.GetTick() + (CONNECT_TIMEOUT / 2));
+
                     do
                     {
                         try
@@ -1176,7 +1180,7 @@ namespace MouseWithoutBorders.Class
                         }
                         catch (SocketException e)
                         {
-                            timeoutLeft = connectTimeout - Common.GetTick();
+                            timeoutLeft = deadline - Common.GetTick();
 
                             if (timeoutLeft > 0)
                             {
@@ -1284,6 +1288,7 @@ namespace MouseWithoutBorders.Class
                 currentSocket.ReceiveBufferSize = Package.PACKAGE_SIZE * 10000;
                 currentSocket.NoDelay = true; // This is very interesting to know:(
                 currentSocket.SendTimeout = 500;
+                Lite.LiteReconnect.EnableKeepAlive(currentSocket); // MwbLite: notice a vanished peer in ~20 s
                 d.MachineName = Common.MachineName;
 
                 d.Type = PackageType.Handshake;
@@ -1661,7 +1666,7 @@ namespace MouseWithoutBorders.Class
                 }
                 else
                 {
-                    SendClipboardData(s, enStream);
+                    SendClipboardData(s, enStream, remoteEndPoint);
                 }
             }
             catch (Exception e)
@@ -1670,7 +1675,7 @@ namespace MouseWithoutBorders.Class
             }
         }
 
-        internal static void SendClipboardData(Socket s, Stream ecStream)
+        internal static void SendClipboardData(Socket s, Stream ecStream, string peer = null)
         {
             if (Common.RunWithNoAdminRight && Setting.Values.OneWayClipboardMode)
             {
@@ -1685,6 +1690,11 @@ namespace MouseWithoutBorders.Class
             {
                 string fileName = null;
 
+                // MwbLite: progress window / tray. A bundle manifest means the zip may still be being built.
+                Lite.LiteTransfers.Transfer xfer = Lite.LiteTransfers.Begin(Clipboard.LastDragDropFile, peer, true, 0, s);
+                xfer.Preparing = Clipboard.LastDragDropFile.EndsWith(Lite.LiteFileBundle.ManifestExtension, StringComparison.OrdinalIgnoreCase);
+                try
+                {
                 if (!Launch.ImpersonateLoggedOnUserAndDoSomething(() =>
                 {
                     // MwbLite: a folder / several files arrive here as a bundle manifest; send its zip (one file, as before).
@@ -1706,11 +1716,19 @@ namespace MouseWithoutBorders.Class
                     {
                         fileName = source;
                         headerString = $"{new FileInfo(fileName).Length}*{fileName}";
+                        xfer.Total = new FileInfo(fileName).Length;
                     }
                 }))
                 {
+                    Lite.LiteTransfers.Fail(xfer, "could not read the file as the signed-in user.");
                     s?.Close();
                     return;
+                }
+
+                xfer.Preparing = false;
+                if (string.IsNullOrEmpty(fileName))
+                {
+                    Lite.LiteTransfers.Fail(xfer, headerString.Substring(headerString.IndexOf('*') + 1));
                 }
 
                 Common.GetBytesU(headerString).CopyTo(header, 0);
@@ -1721,8 +1739,9 @@ namespace MouseWithoutBorders.Class
 
                     if (!string.IsNullOrEmpty(fileName))
                     {
-                        if (SendFile(s, ecStream, fileName))
+                        if (SendFile(s, ecStream, fileName, xfer))
                         {
+                            xfer.Succeeded = true;
                             s.Close(CLOSE_TIMEOUT);
                         }
                     }
@@ -1745,6 +1764,11 @@ namespace MouseWithoutBorders.Class
                 {
                     string log = $"{nameof(SendClipboardData)}: {e.GetType()}/{e.Message}. This is expected when the socket is disposed by a machine switch for ex..";
                     Logger.Log(log);
+                }
+                }
+                finally
+                {
+                    Lite.LiteTransfers.Complete(xfer);
                 }
             }
             else if (!Clipboard.IsClipboardDataImage && Clipboard.LastClipboardData != null)
@@ -1817,14 +1841,15 @@ namespace MouseWithoutBorders.Class
             }
         }
 
-        private static bool SendFileEx(Socket s, Stream ecStream, string fileName)
+        private static bool SendFileEx(Socket s, Stream ecStream, string fileName, Lite.LiteTransfers.Transfer xfer = null)
         {
             try
             {
                 using (FileStream f = File.OpenRead(fileName))
                 {
                     byte[] buf = new byte[Common.NETWORK_STREAM_BUF_SIZE];
-                    int rv, sentCount = 0;
+                    int rv;
+                    long sentCount = 0; // MwbLite: long, drag and drop has no size limit (an int overflowed above 2 GB)
 
                     do
                     {
@@ -1832,11 +1857,12 @@ namespace MouseWithoutBorders.Class
                         {
                             ecStream.Write(buf, 0, rv);
                             sentCount += rv;
+                            xfer?.Report(sentCount);
                         }
                     }
                     while (rv > 0);
 
-                    if ((rv = Package.PACKAGE_SIZE - (sentCount % Package.PACKAGE_SIZE)) > 0)
+                    if ((rv = (int)(Package.PACKAGE_SIZE - (sentCount % Package.PACKAGE_SIZE))) > 0)
                     {
                         Array.Clear(buf, 0, buf.Length);
                         ecStream.Write(buf, 0, rv);
@@ -1862,13 +1888,14 @@ namespace MouseWithoutBorders.Class
                 }
 
                 Common.ShowToolTip(e.Message, 1000, ToolTipIcon.Warning, Setting.Values.ShowClipNetStatus);
+                Lite.LiteTransfers.Fail(xfer, e is IOException ? "the connection was closed." : e.Message);
                 s.Close();
             }
 
             return false;
         }
 
-        private static bool SendFile(Socket s, Stream ecStream, string fileName)
+        private static bool SendFile(Socket s, Stream ecStream, string fileName, Lite.LiteTransfers.Transfer xfer = null)
         {
             bool r = false;
 
@@ -1876,12 +1903,12 @@ namespace MouseWithoutBorders.Class
             {
                 if (fileName.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles) + @"\" + Common.BinaryName + @"\ScreenCaptures\", StringComparison.CurrentCultureIgnoreCase))
                 {
-                    r = SendFileEx(s, ecStream, fileName);
+                    r = SendFileEx(s, ecStream, fileName, xfer);
                 }
             }
             else
             {
-                _ = Launch.ImpersonateLoggedOnUserAndDoSomething(() => { r = SendFileEx(s, ecStream, fileName); });
+                _ = Launch.ImpersonateLoggedOnUserAndDoSomething(() => { r = SendFileEx(s, ecStream, fileName, xfer); });
             }
 
             return r;

@@ -1,12 +1,13 @@
 <Project>
   <!-- Stops the app's root Directory.Build.props (.NET target framework, analyzers) applying to the WiX projects. -->
+  <Import Project="DotNetRuntime.props" />
   <PropertyGroup>
     <!-- Both projects live in this folder: separate obj folders so their NuGet restores (project.assets.json) don't
          overwrite each other, which loses the WiX extensions on a clean build. -->
     <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
     <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
     <PayloadDir Condition="'$(PayloadDir)' == ''">$(MSBuildThisFileDirectory)..\out\payload</PayloadDir>
-    <DefineConstants>ProductVersion=$(ProductVersion);PayloadDir=$(PayloadDir);AppIcon=$(MSBuildThisFileDirectory)..\src\App\Logo.ico</DefineConstants>
+    <DefineConstants>ProductVersion=$(ProductVersion);PayloadDir=$(PayloadDir);AppIcon=$(MSBuildThisFileDirectory)..\src\App\Logo.ico;DotNetRuntimeVersion=$(DotNetRuntimeVersion);DotNetRuntimeUrl=$(DotNetRuntimeUrl);DotNetRuntimeSha512=$(DotNetRuntimeSha512);DotNetRuntimeSize=$(DotNetRuntimeSize)</DefineConstants>
     <!-- Optional code signing, see Signing.targets (enabled by build.ps1 -CertThumbprint / -SignToolArgs). -->
     <CustomAfterWixTargets>$(MSBuildThisFileDirectory)Signing.targets</CustomAfterWixTargets>
     <!-- RtfTheme.wxl is the Setup wizard's strings (a bundle payload), not a localization of these packages. -->

@@ -7,5 +7,6 @@
     <PackageVersion Include="WixToolset.Util.wixext" Version="5.0.2" />
     <PackageVersion Include="WixToolset.Firewall.wixext" Version="5.0.2" />
     <PackageVersion Include="WixToolset.Bal.wixext" Version="5.0.2" />
+    <PackageVersion Include="WixToolset.Netfx.wixext" Version="5.0.2" />
   </ItemGroup>
 </Project>

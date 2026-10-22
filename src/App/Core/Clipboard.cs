@@ -498,6 +498,7 @@ internal static class Clipboard
     {
         ReceivedDestinationFile destinationFile = null;
         Stream m = null;
+        Lite.LiteTransfers.Transfer xfer = null; // MwbLite: progress window / tray
 
         void CloseDestinationFile()
         {
@@ -734,6 +735,7 @@ internal static class Clipboard
                 }
 
                 Logger.Log("==> " + tempFile);
+                xfer = Lite.LiteTransfers.Begin(fileName, remoteMachine, false, dataSize, s);
             }
 
             Common.ShowToolTip(
@@ -753,6 +755,7 @@ internal static class Clipboard
                 if (rv > 0)
                 {
                     rv = WriteReceivedData(m, buf, rv, dataSize, ref receivedCount);
+                    xfer?.Report(receivedCount);
                 }
 
                 if (Common.ToggleIcons == null)
@@ -776,6 +779,7 @@ internal static class Clipboard
             if (!HasExpectedReceivedDataLength(m, dataSize))
             {
                 Logger.Log($"Received incomplete file: expected {dataSize} bytes, wrote {m.Length} bytes.");
+                Lite.LiteTransfers.Fail(xfer, "only part of the file arrived.");
                 CloseDestinationFile();
                 Common.SetToggleIcon(new int[Common.TOGGLE_ICONS_SIZE] { Common.ICON_ERROR, -1, Common.ICON_ERROR, -1 });
                 Common.ShowToolTip("Could not receive the complete destination file.", 1000, ToolTipIcon.Warning, Setting.Values.ShowClipNetStatus);
@@ -898,6 +902,12 @@ internal static class Clipboard
                     }
                 }
 
+                if (xfer != null)
+                {
+                    xfer.Succeeded = true;
+                    xfer.ResultText = toolTipText;
+                }
+
                 if (!string.IsNullOrWhiteSpace(toolTipText))
                 {
                     Common.ShowToolTip(toolTipText, 5000, ToolTipIcon.Info, Setting.Values.ShowClipNetStatus);
@@ -937,9 +947,14 @@ internal static class Clipboard
                 -1, Common.ICON_BIG_CLIPBOARD, -1,
             });
             Common.ShowToolTip(e.Message, 1000, ToolTipIcon.Info, Setting.Values.ShowClipNetStatus);
+            Lite.LiteTransfers.Fail(xfer, e is IOException ? "the connection was closed." : e.Message);
             CloseDestinationFile();
 
             return;
+        }
+        finally
+        {
+            Lite.LiteTransfers.Complete(xfer);
         }
 
         s.Close();

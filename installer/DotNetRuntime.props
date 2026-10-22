@@ -1,0 +1,13 @@
+<Project>
+  <!--
+    The .NET Desktop Runtime that MwbLite-Setup.exe installs when a PC doesn't have it (or has an older 10.0 patch).
+    Downloaded from Microsoft at install time; Burn checks the SHA-512 below before running it.
+    Refresh with tools\update-runtime-pin.ps1 when Microsoft ships a .NET 10 patch.
+  -->
+  <PropertyGroup>
+    <DotNetRuntimeVersion>10.0.13</DotNetRuntimeVersion>
+    <DotNetRuntimeUrl>https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/10.0.13/windowsdesktop-runtime-10.0.13-win-x64.exe</DotNetRuntimeUrl>
+    <DotNetRuntimeSha512>adaf5e06b66b145848f3a994b51ea1590d19a5c02f6e7c5899ed896bbdb020af6386d2eaef613034d697388adaf48aa8c3291343f0bbb5f8e62e37aff9564a00</DotNetRuntimeSha512>
+    <DotNetRuntimeSize>60056984</DotNetRuntimeSize>
+  </PropertyGroup>
+</Project>

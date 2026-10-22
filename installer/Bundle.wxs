@@ -1,9 +1,14 @@
 <!--
   MwbLite-Setup.exe: a WiX Burn bundle around the MwbLite MSI. Shows the licence, installs with one UAC
   prompt, and offers to launch MwbLite (unelevated) when done. Registers in Settings > Apps as "MwbLite".
+
+  MwbLite uses the shared .NET Desktop Runtime. If the PC doesn't have version $(var.DotNetRuntimeVersion) or a newer
+  10.0 patch, Setup downloads Microsoft's installer (checked against the SHA-512 in DotNetRuntime.props) and runs
+  it first. The runtime is left installed on uninstall (other apps may use it); Windows Update keeps it patched.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx">
   <Bundle Name="MwbLite"
           Manufacturer="MwbLite"
           Version="$(var.ProductVersion)"
@@ -18,7 +23,29 @@
                                               SuppressOptionsUI="yes" />
     </BootstrapperApplication>
 
+    <netfx:DotNetCoreSearch Id="DesktopRuntimeSearch" RuntimeType="desktop" Platform="x64" MajorVersion="10" Variable="DesktopRuntimeVersion" />
+
     <Chain>
+      <ExePackage Id="DotNetDesktopRuntime"
+                  DisplayName=".NET $(var.DotNetRuntimeVersion) Desktop Runtime (x64)"
+                  Description="Microsoft .NET Desktop Runtime, needed by MwbLite"
+                  Permanent="yes"
+                  Vital="yes"
+                  PerMachine="yes"
+                  Cache="remove"
+                  InstallArguments="/install /quiet /norestart"
+                  DetectCondition="DesktopRuntimeVersion &gt;= v$(var.DotNetRuntimeVersion)">
+        <ExePackagePayload Name="windowsdesktop-runtime-$(var.DotNetRuntimeVersion)-win-x64.exe"
+                           DownloadUrl="$(var.DotNetRuntimeUrl)"
+                           Hash="$(var.DotNetRuntimeSha512)"
+                           Size="$(var.DotNetRuntimeSize)"
+                           Version="$(var.DotNetRuntimeVersion)"
+                           ProductName="Microsoft .NET Desktop Runtime"
+                           Description="Microsoft .NET Desktop Runtime - $(var.DotNetRuntimeVersion) (x64)" />
+        <!-- 1638: a newer version is already installed. 3010: installed, restart needed. -->
+        <ExitCode Value="1638" Behavior="success" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
       <MsiPackage SourceFile="$(var.MwbLite.Installer.TargetPath)" />
     </Chain>
   </Bundle>

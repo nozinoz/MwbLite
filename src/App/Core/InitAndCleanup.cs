@@ -132,6 +132,7 @@ internal static class InitAndCleanup
         SystemEvents.DisplaySettingsChanged += new EventHandler(WinAPI.SystemEvents_DisplaySettingsChanged);
         NetworkChange.NetworkAvailabilityChanged += new NetworkAvailabilityChangedEventHandler(NetworkChange_NetworkAvailabilityChanged);
         SystemEvents.PowerModeChanged += new PowerModeChangedEventHandler(SystemEvents_PowerModeChanged);
+        Lite.LiteReconnect.Start();
         PleaseReopenSocket = 9;
         /* TODO: Telemetry for the matrix? */
     }
@@ -145,6 +146,10 @@ internal static class InitAndCleanup
             Logger.TelemetryLogTrace($"{nameof(SystemEvents_PowerModeChanged)}: {e.Mode}", SeverityLevel.Information);
             LastResumeSuspendTime = DateTime.UtcNow;
             MachineStuff.SwitchToMultipleMode(false, true);
+
+            // MwbLite: close the sockets on suspend (peers see the PC leave) and on resume (they may look
+            // connected but are dead); the helper timer reopens them straight away.
+            ScheduleReopenSocketsDueToNetworkChanges();
         }
     }
 
@@ -245,7 +250,7 @@ internal static class InitAndCleanup
         ScheduleReopenSocketsDueToNetworkChanges(!e.IsAvailable);
     }
 
-    private static void ScheduleReopenSocketsDueToNetworkChanges(bool closeSockets = true)
+    internal static void ScheduleReopenSocketsDueToNetworkChanges(bool closeSockets = true)
     {
         if (closeSockets)
         {

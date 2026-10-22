@@ -764,7 +764,7 @@ internal static class Common
                 {
                     if (MainForm != null)
                     {
-                        MainForm.ShowToolTip(tip, timeOutInMilliseconds, forceEvenIfHidingOldUI: forceEvenIfHidingOldUI);
+                        MainForm.ShowToolTip(tip, timeOutInMilliseconds, icon, forceEvenIfHidingOldUI); // MwbLite: pass the icon through
                     }
                     else
                     {

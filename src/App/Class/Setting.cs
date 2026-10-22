@@ -71,6 +71,17 @@ namespace MouseWithoutBorders.Class
 
         internal string SettingsFile => _settingsFile;
 
+        internal bool ShowTransferProgress
+        {
+            get
+            {
+                lock (_loadingSettingsLock)
+                {
+                    return _config.ShowTransferProgress;
+                }
+            }
+        }
+
         internal bool StartWithWindows
         {
             get

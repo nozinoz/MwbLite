@@ -71,6 +71,16 @@ namespace MouseWithoutBorders.Class
             LiteLog.Initialize(LitePaths.LogDir, runningAsSystem ? "mwblite-system" : "mwblite");
             Logger.Log(Application.ProductName + " Started!");
 
+            // MwbLite: settings files from older versions hold the key in plain text; encrypt it (once).
+            try
+            {
+                _ = LiteConfig.ProtectPlainKeyInFile(LitePaths.SettingsFile);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+            {
+                LiteLog.Write("Startup", "Could not encrypt the key in " + LitePaths.SettingsFile + ": " + e.Message);
+            }
+
             Thread.CurrentThread.Name = Application.ProductName + " main thread";
             Common.BinaryName = Path.GetFileNameWithoutExtension(Application.ExecutablePath);
 

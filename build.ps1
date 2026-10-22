@@ -110,17 +110,18 @@ foreach ($dir in $dist, $payload) {
 
 $version = ([xml](Get-Content (Join-Path $root 'Directory.Build.props') -Raw)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
 $portable = Join-Path $dist 'portable'
-$common = @('-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '--nologo', '-v', 'minimal', '-p:DebugType=none')
+$common = @('-c', 'Release', '-r', 'win-x64', '--nologo', '-v', 'minimal', '-p:DebugType=none')
 
-# a) Portable: two single-file exes. No compression: compressed bundles are inflated into private
-#    memory at startup (~3x the RAM).
-$singleFile = $common + @('-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true',
+# a) Portable: two self-contained single-file exes (no .NET install needed). No compression: compressed
+#    bundles are inflated into private memory at startup (~3x the RAM).
+$singleFile = $common + @('--self-contained', 'true', '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true',
     '-p:EnableCompressionInSingleFile=false', '-o', $portable)
 Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\MwbLite.csproj')) + $singleFile)
 Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\Helper\MwbLite.Helper.csproj')) + $singleFile)
 
-# b) Installer payload: both apps in one folder sharing one .NET runtime.
-$folder = $common + @('-p:PublishSingleFile=false', '-o', $payload)
+# b) Installer payload: both apps in one folder, framework-dependent. They run on the shared .NET Desktop
+#    Runtime, which Setup installs when missing (installer\DotNetRuntime.props) and Windows Update patches.
+$folder = $common + @('--self-contained', 'false', '-p:PublishSingleFile=false', '-o', $payload)
 Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\MwbLite.csproj')) + $folder)
 Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\Helper\MwbLite.Helper.csproj')) + $folder)
 

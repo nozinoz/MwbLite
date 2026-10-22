@@ -46,6 +46,7 @@ namespace MouseWithoutBorders.Lite
         private readonly CheckBox wrapMouse = new();
         private readonly CheckBox shareClipboard = new();
         private readonly CheckBox transferFile = new();
+        private readonly CheckBox showTransferProgress = new();
         private readonly CheckBox startWithWindows = new();
         private readonly CheckBox useService = new();
         private readonly GroupBox advancedGroup = new();
@@ -267,11 +268,13 @@ namespace MouseWithoutBorders.Lite
             shareClipboard.Text = "Share the clipboard (text and images)";
             transferFile.Text = "Transfer files and folders (copy/paste up to 100 MB in total; drag and drop any size)";
             transferFile.Margin = new Padding(em * 2, 3, 3, 3);
+            showTransferProgress.Text = "Show file copy progress (with Cancel) and a notification when done";
+            showTransferProgress.Margin = new Padding(em * 2, 3, 3, 3);
             startWithWindows.Text = "Start with Windows";
             useService.Text = "Service mode: control the lock screen and UAC prompts (one-time admin install)";
             shareClipboard.CheckedChanged += (s, e) => transferFile.Enabled = shareClipboard.Checked;
 
-            foreach (var cb in new[] { shareClipboard, transferFile, startWithWindows, useService })
+            foreach (var cb in new[] { shareClipboard, transferFile, showTransferProgress, startWithWindows, useService })
             {
                 cb.AutoSize = true;
                 grid.Controls.Add(cb);
@@ -379,9 +382,10 @@ namespace MouseWithoutBorders.Lite
             var save = NewButton("Save && apply", (s, e) => SaveAndApply());
             var cancel = NewButton("Cancel", (s, e) => Close());
             var json = NewButton("Open JSON…", (s, e) => LiteTray.OpenUserConfigInEditor());
+            var check = NewButton("Check connection…", (s, e) => DiagnosticsForm.ShowFor(this, loaded));
             AcceptButton = save;
             CancelButton = cancel;
-            row.Controls.AddRange(new Control[] { save, cancel, json });
+            row.Controls.AddRange(new Control[] { save, cancel, json, check });
             return row;
         }
 
@@ -417,6 +421,7 @@ namespace MouseWithoutBorders.Lite
 
             shareClipboard.Checked = cfg.ShareClipboard;
             transferFile.Checked = cfg.TransferFile;
+            showTransferProgress.Checked = cfg.ShowTransferProgress;
             transferFile.Enabled = cfg.ShareClipboard;
             startWithWindows.Checked = cfg.StartWithWindows;
             useService.Checked = cfg.UseService;
@@ -505,6 +510,7 @@ namespace MouseWithoutBorders.Lite
             cfg.Layout.WrapMouse = wrapMouse.Checked;
             cfg.ShareClipboard = shareClipboard.Checked;
             cfg.TransferFile = transferFile.Checked;
+            cfg.ShowTransferProgress = showTransferProgress.Checked;
             cfg.StartWithWindows = startWithWindows.Checked;
             cfg.UseService = useService.Checked;
 

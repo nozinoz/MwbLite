@@ -240,5 +240,89 @@ namespace MouseWithoutBorders.Lite
         }
 
         private static string Truncate(string s) => s.Length <= 250 ? s : s[..247] + "...";
+
+        // ---- live status (tray tooltip/icon, status.json, transfer window) -------------------------------------
+
+        private static readonly TimeSpan StatusRewrite = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan ShowWindowAfter = TimeSpan.FromSeconds(1);
+        private const long ShowWindowAbove = 2L << 20; // 2 MB
+
+        private static int timerTicks;
+        private static string lastSignature;
+        private static DateTime lastStatusWrite;
+        private static bool keyMismatchNotified;
+        private static bool statusDirReady;
+
+        /// <summary>Called by FrmScreen.HelperTimer_Tick (UI thread, every 100 ms).</summary>
+        internal static void OnTimer()
+        {
+            if (Common.RunOnLogonDesktop || Common.RunOnScrSaverDesktop)
+            {
+                return;
+            }
+
+            try
+            {
+                timerTicks++;
+                DateTime now = DateTime.UtcNow;
+
+                if (timerTicks % 3 == 0 && Setting.Values.ShowTransferProgress && !TransferWindow.IsOpen &&
+                    LiteTransfers.Snapshot(now).Any(t => t.IsActive && (t.Preparing || t.Total > ShowWindowAbove || now - t.StartedUtc > ShowWindowAfter)))
+                {
+                    TransferWindow.ShowIfNeeded();
+                }
+
+                if (timerTicks % 10 != 0)
+                {
+                    return; // the rest once a second
+                }
+
+                StatusSnapshot status = LiteStatus.Refresh();
+                string signature = status.Signature;
+                if (signature != lastSignature)
+                {
+                    lastSignature = signature;
+                    Common.MainForm?.SetTrayIconText(LiteStatus.TrayText(status));
+                    if (Common.ToggleIcons == null)
+                    {
+                        Common.MainForm?.ChangeIcon(-1); // amber dot on/off
+                    }
+
+                    PcStatus mismatch = status.Pcs.FirstOrDefault(p => p.State == PcState.KeyMismatch);
+                    if (mismatch != null && !keyMismatchNotified)
+                    {
+                        keyMismatchNotified = true;
+                        Common.ShowToolTip($"{mismatch.Name} has a different security key, so it can't connect. Pair the PCs again: Settings > Add a PC.", 10000, ToolTipIcon.Warning, true);
+                    }
+                    else if (mismatch == null)
+                    {
+                        keyMismatchNotified = false;
+                    }
+
+                    WriteStatus(status, now);
+                }
+                else if (now - lastStatusWrite > StatusRewrite)
+                {
+                    WriteStatus(status, now);
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Log(e);
+            }
+        }
+
+        private static void WriteStatus(StatusSnapshot status, DateTime now)
+        {
+            lastStatusWrite = now;
+            string path = LitePaths.StatusFile;
+            if (LitePaths.IsSystem && !statusDirReady)
+            {
+                LitePaths.EnsureReadableDirectory(Path.GetDirectoryName(path));
+                statusDirReady = true;
+            }
+
+            LiteStatus.Write(status, path);
+        }
     }
 }

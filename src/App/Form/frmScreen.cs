@@ -224,21 +224,30 @@ namespace MouseWithoutBorders
                         menuGetScreenCapture.DropDown.Items.Count - 1]);
                 }
 
+                // MwbLite: list every PC in the layout with its live state (upstream listed only PCs seen in
+                // the last 30 minutes, with no state). Click one to move the mouse and keyboard there.
+                Lite.StatusSnapshot status = Lite.LiteStatus.Refresh();
                 for (int i = 0; i < MachineStuff.MAX_MACHINE; i++)
                 {
                     string newMachine = MachineStuff.MachineMatrix[i].Trim();
+                    Lite.PcStatus pc = status.Pcs.Find(p => p.Name.Equals(newMachine, StringComparison.OrdinalIgnoreCase));
 
-                    if (MachineStuff.MachinePool.TryFindMachineByName(newMachine, out MachineInf inf) && MachinePool.IsAlive(inf))
+                    if (pc != null)
                     {
                         ToolStripMenuItem newItem = new(
                             newMachine,
                             null,
                             new EventHandler(MenuOnClick));
-                        newItem.Tag = "MACHINE: " + inf.Name;
+                        newItem.Tag = "MACHINE: " + newMachine;
                         newItem.ToolTipText = "Switch Mouse/keyboard to " + newMachine;
+                        newItem.ShortcutKeyDisplayString = Lite.LiteStatus.StateText(pc.State);
+                        newItem.Enabled = pc.State is Lite.PcState.Connected or Lite.PcState.ThisPc;
                         newItem.Visible = true;
                         _ = MainMenu.Items.Add(newItem);
+                    }
 
+                    if (MachineStuff.MachinePool.TryFindMachineByName(newMachine, out MachineInf inf) && MachinePool.IsAlive(inf))
+                    {
                         if (!newMachine.Equals(Common.MachineName.Trim(), StringComparison.OrdinalIgnoreCase))
                         {
                             ToolStripMenuItem newItem2 = new(
@@ -333,6 +342,7 @@ namespace MouseWithoutBorders
         private void HelperTimer_Tick(object sender, EventArgs e)
         {
             Helper.WndProcCounter++;
+            Lite.LiteTray.OnTimer(); // MwbLite: tray status, status.json, transfer progress window
 
             if (busy)
             {
@@ -699,6 +709,15 @@ namespace MouseWithoutBorders
                     g.FillEllipse(Brushes.Red, 8, 8, 16, 16);
                     g.Dispose();
                 }
+                else if (Lite.LiteStatus.Current.AnyMissing)
+                {
+                    // MwbLite: amber dot when a PC in the layout isn't connected.
+                    int d = bm.Width * 7 / 16;
+                    g = Graphics.FromImage(bm);
+                    g.FillEllipse(Brushes.Orange, bm.Width - d - 1, bm.Height - d - 1, d, d);
+                    g.DrawEllipse(Pens.Black, bm.Width - d - 1, bm.Height - d - 1, d, d);
+                    g.Dispose();
+                }
 
 #if DEBUG
                 p = new Pen(Color.White, 4);
@@ -887,9 +906,9 @@ namespace MouseWithoutBorders
 
         internal void SetTrayIconText(string value)
         {
-            if (value.Length > 63)
+            if (value.Length > 127) // MwbLite: Windows allows 127 characters (upstream capped at 63)
             {
-                value = value[..63];
+                value = value[..127];
             }
 
             NotifyIcon.Text = value;
@@ -897,6 +916,13 @@ namespace MouseWithoutBorders
 
         internal void UpdateNotifyIcon()
         {
+            // MwbLite: connection summary instead of the bare layout.
+            if (Lite.LiteStatus.Current.Pcs.Count > 0)
+            {
+                SetTrayIconText(Lite.LiteStatus.TrayText(Lite.LiteStatus.Current));
+                return;
+            }
+
             string[] x = MachineStuff.MachineMatrix;
             string iconText;
             if (x != null && (x[0].Length > 0 || x[1].Length > 0 || x[2].Length > 0 || x[3].Length > 0))

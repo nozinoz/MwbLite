@@ -2,7 +2,8 @@
   MwbLite MSI (per-machine). Wrapped by Bundle.wxs into MwbLite-Setup.exe.
 
   Installs to C:\Program Files\MwbLite:
-    - the app (self-contained, one shared .NET runtime for MwbLite.exe and MwbLite.Helper.exe)
+    - the app (framework-dependent: runs on the shared .NET 10 Desktop Runtime, which MwbLite-Setup.exe installs
+      when missing; run on its own, this MSI relies on the runtime being there)
     - Start menu shortcuts "MwbLite" and "MwbLite Settings"
     - the MwbLite.Service service (demand start; local users may start/stop it, as with the install command)
     - inbound firewall rules for MwbLite.exe, local subnet only: TCP (MWB + pairing), UDP 15102 (pairing discovery)

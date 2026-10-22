@@ -18,7 +18,9 @@ namespace MouseWithoutBorders.Exceptions
         internal ExpectedSocketException(SocketException se)
             : base(se.Message)
         {
-            ShouldReconnect = se.ErrorCode == 10054;
+            // MwbLite: also WSAECONNABORTED and WSAETIMEDOUT (what a TCP keepalive failure raises), so a dead
+            // peer is redialled instead of waiting for the next periodic retry.
+            ShouldReconnect = se.ErrorCode is 10054 or 10053 or 10060;
         }
     }
 }
