@@ -63,6 +63,9 @@ namespace MouseWithoutBorders.Lite
         /// <summary>Show a progress window (with Cancel) for file copies and a notification when they finish.</summary>
         public bool ShowTransferProgress { get; set; } = true;
 
+        /// <summary>Check GitHub Releases for a new version once a week (Settings > About can always check).</summary>
+        public bool CheckForUpdates { get; set; } = true;
+
         public bool StartWithWindows { get; set; }
 
         /// <summary>Run through the MwbLite.Service Windows service (lock screen / UAC prompt support). Needs "--install".</summary>

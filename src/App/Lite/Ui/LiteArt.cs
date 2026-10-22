@@ -194,7 +194,7 @@ namespace MouseWithoutBorders.Lite.Ui
         }
 
         /// <summary>Installer header: blue gradient with the glyph, the name and the tagline (drawn at 2× for sharpness).</summary>
-        internal static Bitmap BannerBitmap(int width, int height)
+        internal static Bitmap BannerBitmap(int width, int height, string version = null)
         {
             var bm = new Bitmap(width, height, PixelFormat.Format32bppArgb);
             using Graphics g = Graphics.FromImage(bm);
@@ -225,6 +225,28 @@ namespace MouseWithoutBorders.Lite.Ui
             g.DrawString("MwbLite", title, Brushes.White, x, h * 0.22f);
             using var soft = new SolidBrush(Color.FromArgb(225, 255, 255, 255));
             g.DrawString("One keyboard and mouse for all your PCs", tagline, soft, x + (h * 0.01f), h * 0.53f);
+
+            if (!string.IsNullOrEmpty(version))
+            {
+                // The version, prominently: a white pill on the right.
+                using var label = new Font("Segoe UI Variable Text", h * 0.10f, FontStyle.Regular, GraphicsUnit.Pixel);
+                using var number = new Font("Segoe UI Variable Display", h * 0.20f, FontStyle.Bold, GraphicsUnit.Pixel);
+                SizeF ls = g.MeasureString("VERSION", label);
+                SizeF ns = g.MeasureString(version, number);
+                float pw = Math.Max(ls.Width, ns.Width) + (h * 0.24f), ph = ls.Height + ns.Height + (h * 0.10f);
+                var pill = new RectangleF(width - pw - (h * 0.22f), (h - ph) / 2f, pw, ph);
+                using (GraphicsPath path = RoundRect(pill, h * 0.10f))
+                using (var white = new SolidBrush(Color.FromArgb(240, 255, 255, 255)))
+                {
+                    g.FillPath(white, path);
+                }
+
+                using var accent = new SolidBrush(Accent);
+                using var grey = new SolidBrush(Color.FromArgb(0x5A, 0x5A, 0x5A));
+                g.DrawString("VERSION", label, grey, pill.X + ((pill.Width - ls.Width) / 2f), pill.Y + (h * 0.05f));
+                g.DrawString(version, number, accent, pill.X + ((pill.Width - ns.Width) / 2f), pill.Y + (h * 0.04f) + ls.Height);
+            }
+
             return bm;
         }
 

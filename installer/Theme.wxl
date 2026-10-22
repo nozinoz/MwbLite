@@ -11,7 +11,7 @@
   replaced at the next restart, as in a silent install.
 -->
 <WixLocalization Culture="en-us" Language="1033" xmlns="http://wixtoolset.org/schemas/v4/wxl">
-  <String Id="Caption" Value="[WixBundleName] Setup" />
+  <String Id="Caption" Value="[WixBundleName] [WixBundleVersion] Setup" />
   <String Id="Title" Value="[WixBundleName]" />
   <String Id="CheckingForUpdatesLabel" Value="Checking for updates" />
   <String Id="UpdateButton" Value="&amp;Update to version [WixStdBAUpdateAvailable]" />
@@ -35,22 +35,22 @@
   <String Id="OptionsBrowseButton" Value="&amp;Browse" />
   <String Id="OptionsOkButton" Value="&amp;OK" />
   <String Id="OptionsCancelButton" Value="&amp;Cancel" />
-  <String Id="ProgressHeader" Value="Installing…" />
+  <String Id="ProgressHeader" Value="Installing MwbLite [WixBundleVersion]…" />
   <String Id="ProgressLabel" Value="Processing:" />
   <String Id="OverallProgressPackageText" Value="Getting ready…" />
   <String Id="ProgressCancelButton" Value="&amp;Cancel" />
-  <String Id="ModifyHeader" Value="MwbLite is installed" />
+  <String Id="ModifyHeader" Value="MwbLite [WixBundleVersion] is installed" />
   <String Id="ModifyMessage" Value="Repair puts back any missing files, the service and the firewall rules. Uninstall removes MwbLite; your own settings are kept." />
   <String Id="ModifyRepairButton" Value="&amp;Repair" />
   <String Id="ModifyUninstallButton" Value="&amp;Uninstall" />
   <String Id="ModifyCancelButton" Value="&amp;Cancel" />
   <String Id="SuccessHeader" Value="Done" />
   <String Id="SuccessCacheHeader" Value="Done" />
-  <String Id="SuccessInstallHeader" Value="MwbLite is ready" />
+  <String Id="SuccessInstallHeader" Value="MwbLite [WixBundleVersion] is ready" />
   <String Id="SuccessInstallMessage" Value="It runs in the notification area. Open Settings from its icon to pair your PCs: Add a PC on one, Join on the other." />
   <String Id="SuccessLayoutHeader" Value="Done" />
   <String Id="SuccessModifyHeader" Value="Done" />
-  <String Id="SuccessRepairHeader" Value="MwbLite is repaired" />
+  <String Id="SuccessRepairHeader" Value="MwbLite [WixBundleVersion] is repaired" />
   <String Id="SuccessUninstallHeader" Value="MwbLite was removed" />
   <String Id="SuccessUnsafeUninstallHeader" Value="MwbLite was removed" />
   <String Id="SuccessLaunchButton" Value="&amp;Open MwbLite" />

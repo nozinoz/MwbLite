@@ -111,6 +111,11 @@ foreach ($dir in $dist, $payload) {
 $version = ([xml](Get-Content (Join-Path $root 'Directory.Build.props') -Raw)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
 $portable = Join-Path $dist 'portable'
 $common = @('-c', 'Release', '-r', 'win-x64', '--nologo', '-v', 'minimal', '-p:DebugType=none')
+# The commit goes into the version info (shown in Settings > About), when building from a git checkout.
+$commit = (& git -C $root rev-parse --short=9 HEAD 2>$null)
+if ($LASTEXITCODE -eq 0 -and $commit) {
+    $common += "-p:SourceRevisionId=$commit"
+}
 
 # a) Portable: two self-contained single-file exes (no .NET install needed). No compression: compressed
 #    bundles are inflated into private memory at startup (~3x the RAM).
@@ -118,6 +123,14 @@ $singleFile = $common + @('--self-contained', 'true', '-p:PublishSingleFile=true
     '-p:EnableCompressionInSingleFile=false', '-o', $portable)
 Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\MwbLite.csproj')) + $singleFile)
 Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\Helper\MwbLite.Helper.csproj')) + $singleFile)
+
+# Setup's banner, with this version on it (drawn by the app's own artwork code).
+$banner = Join-Path $root 'out\banner.png'
+New-Item -ItemType Directory -Force -Path (Split-Path $banner) | Out-Null
+$bannerProcess = Start-Process -FilePath (Join-Path $portable 'MwbLite.exe') -ArgumentList '--make-banner', "`"$banner`"", $version -Wait -PassThru
+if ($bannerProcess.ExitCode -ne 0 -or -not (Test-Path $banner)) {
+    throw "Could not draw the Setup banner (exit code $($bannerProcess.ExitCode))."
+}
 
 # b) Installer payload: both apps in one folder, framework-dependent. They run on the shared .NET Desktop
 #    Runtime, which Setup installs when missing (installer\DotNetRuntime.props) and Windows Update patches.
@@ -168,7 +181,7 @@ if ($CertThumbprint -or $SignToolArgs) {
 # --- 5. Installer: MwbLite-Setup.exe + MSI ---------------------------------------------------
 if (-not $SkipInstaller) {
     $wixArgs = @('build', (Join-Path $root 'installer\MwbLite.Setup.wixproj'), '-c', 'Release', '--nologo', '-v', 'minimal',
-        "-p:ProductVersion=$version", "-p:PayloadDir=$payload")
+        "-p:ProductVersion=$version", "-p:PayloadDir=$payload", "-p:BannerFile=$banner")
     if ($signToolArgsResolved) {
         $wixArgs += @('-p:SignOutput=true', "-p:SignToolPath=$SignToolPath", "-p:SignToolArgs=$signToolArgsResolved")
     }

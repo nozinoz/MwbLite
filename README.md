@@ -69,7 +69,9 @@ built, MwbLite uses about 27 MB + 15 MB of private memory, compared with about 3
 
 ### With Setup (recommended)
 
-Run `MwbLite-Setup-<version>.exe` on each PC. Tick **I agree to the licence terms** (the link opens them), leave
+Download `MwbLite-Setup-<version>.exe` from the project's
+[Releases](https://github.com/nozinoz/MwbLite/releases) page (or build it), and run it on each PC. The version
+is shown on Setup's banner and in its title. Tick **I agree to the licence terms** (the link opens them), leave
 **Start MwbLite when I sign in** ticked if you want that, press **Install**, approve the UAC prompt, then **Open
 MwbLite**. Setup:
 
@@ -198,6 +200,8 @@ sidebar, cards and switches, and light or dark mode following Windows (it uses W
 - **Advanced.** The **security key** (set by pairing; **Show**, **Copy** and **Reset pairing…**, which makes a new
   key so this PC stops working with the others until they're paired again), port, Easy Mouse, hotkeys,
   name-to-IP mappings, the less common switches, **Allow older versions**, and **Open in Notepad**.
+- **About.** Version and details, links, the update status and **Update now** (see
+  [Updates and the About page](#updates-and-the-about-page)).
 - **Save** (or Ctrl+S) validates first, using the same checks as Reload config. If something is wrong, the window
   stays open and the problem is shown in red at the bottom. Otherwise it writes settings.json and the running
   MwbLite picks it up:
@@ -517,8 +521,9 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
   The exchange uses ECDH (P-256) with a hash commitment and AES-256-GCM, built from .NET's own cryptography. An
   attacker on the network gets one guess in a million at making both screens match. `Add a PC` accepts one PC per
   session, for up to 5 minutes. See [How pairing works](#how-pairing-works).
-- **No outbound calls** other than to the MWB peers you configure: no telemetry, update checks or crash
-  reporting.
+- **Outbound calls:** only to the MWB peers you configure, plus a weekly update check (one HTTPS request to
+  GitHub's API for the latest release; nothing about you or the PC is sent beyond a `MwbLite/<version>` user
+  agent). Switch it off under Settings > About. No telemetry or crash reporting.
 
 ## Known limitations
 
@@ -542,8 +547,34 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
   this has not been tested against PowerToys.
 - **A little extra CPU per connection:** each connection does a TLS handshake (a few milliseconds), and every
   message is encrypted twice (TLS, then MWB's own AES). The messages are small; the cost isn't noticeable.
-- **Updates are manual.** See below.
+- **Updates install with Setup.** Settings > About > Update now downloads and runs the new Setup, which asks
+  for UAC approval like the first install.
 - **Notepad is always used** by "Open config file", not your default `.json` editor.
+
+## Updates and the About page
+
+Settings > **About** shows the version (and the git commit it was built from), where MwbLite is installed, its
+settings and log files, whether it runs as a service, and links to the project, its releases, issues, the licence
+and third-party notices. **Copy details** puts all of it on the clipboard, handy for a bug report.
+
+![About](docs/about.png)
+
+**Update check.** About shows whether you're up to date. Once a week (switch: **Check for updates every week**)
+MwbLite asks GitHub for the latest release; if it's newer, a notification says so, and clicking it opens About.
+**Update now** downloads that release's `MwbLite-Setup-<version>.exe` over HTTPS, checks its size and SHA-256
+against the digest GitHub publishes for it (or the release's `SHA256SUMS.txt`), and starts it. Setup asks for UAC
+approval, stops MwbLite, upgrades it in place and keeps your settings. Do the same on every PC: they must run the
+same version.
+
+**Publishing a release** (maintainers): bump `<Version>` in `Directory.Build.props`, add its section to
+`CHANGELOG.md`, run `build.cmd`, commit and push, then:
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\publish-release.ps1
+```
+
+It creates the GitHub Release `v<version>` with Setup, the MSI and `SHA256SUMS.txt`, using the changelog section
+as its notes. Installed copies see it at their next check.
 
 ## Sharing MwbLite with other people
 

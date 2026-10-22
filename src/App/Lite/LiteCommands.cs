@@ -57,7 +57,7 @@ namespace MouseWithoutBorders.Lite
                         Application.EnableVisualStyles();
                         _ = Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
                         Application.SetCompatibleTextRenderingDefault(false);
-                        return LiteTray.RunSettingsProcess();
+                        return LiteTray.RunSettingsProcess(args.Length > 2 ? args[2] : null);
 
                     case "--open-config":
                         LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");
@@ -129,6 +129,15 @@ namespace MouseWithoutBorders.Lite
                     case "--render-ui":
                         LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");
                         return Ui.UiPreview.Run(args.Length > 2 ? args[2] : Environment.CurrentDirectory);
+
+                    // Build: Setup's banner with the version on it ("--make-banner <png> <version>", run by build.ps1).
+                    case "--make-banner":
+                        using (System.Drawing.Bitmap banner = Ui.LiteArt.BannerBitmap(1120, 200, args.Length > 3 ? args[3] : null))
+                        {
+                            banner.Save(args[2], System.Drawing.Imaging.ImageFormat.Png);
+                        }
+
+                        return 0;
 
                     // Development: regenerate src\App\Logo.ico and installer\Assets from Lite/Ui/LiteArt (tools\make-art.ps1).
                     case "--make-art":

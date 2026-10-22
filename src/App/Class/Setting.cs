@@ -71,6 +71,17 @@ namespace MouseWithoutBorders.Class
 
         internal string SettingsFile => _settingsFile;
 
+        internal bool CheckForUpdates
+        {
+            get
+            {
+                lock (_loadingSettingsLock)
+                {
+                    return _config.CheckForUpdates;
+                }
+            }
+        }
+
         internal bool AllowInsecureConnections
         {
             get

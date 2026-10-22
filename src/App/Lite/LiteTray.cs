@@ -25,8 +25,9 @@ namespace MouseWithoutBorders.Lite
         /// (never as SYSTEM). In normal mode the running MwbLite reloads when that window saves settings.json
         /// (<see cref="WatchUserSettings"/>).
         /// </summary>
-        internal static void ShowSettings()
+        internal static void ShowSettings(string page = null)
         {
+            string args = page == null ? "--settings" : "--settings " + page;
             if (Common.RunOnLogonDesktop || Common.RunOnScrSaverDesktop)
             {
                 return;
@@ -36,11 +37,11 @@ namespace MouseWithoutBorders.Lite
             {
                 if (LitePaths.IsSystem)
                 {
-                    _ = Launch.CreateProcessInInputDesktopSession("\"" + LitePaths.ExePath + "\"", "--settings", "default", 1);
+                    _ = Launch.CreateProcessInInputDesktopSession("\"" + LitePaths.ExePath + "\"", args, "default", 1);
                 }
                 else
                 {
-                    _ = Process.Start(new ProcessStartInfo(LitePaths.ExePath, "--settings") { UseShellExecute = false });
+                    _ = Process.Start(new ProcessStartInfo(LitePaths.ExePath, args) { UseShellExecute = false });
                 }
             }
             catch (Exception e)
@@ -51,7 +52,7 @@ namespace MouseWithoutBorders.Lite
         }
 
         /// <summary>"MwbLite.exe --settings": the Settings window (WPF, Windows 11 Fluent theme) as its own process.</summary>
-        internal static int RunSettingsProcess()
+        internal static int RunSettingsProcess(string page = null)
         {
             using var mutex = new System.Threading.Mutex(true, @"Local\MwbLite-Settings", out bool first);
             if (!first)
@@ -73,6 +74,7 @@ namespace MouseWithoutBorders.Lite
 
             if (window != null)
             {
+                window.SelectPage(page);
                 _ = app.Run(window);
             }
 
@@ -261,6 +263,8 @@ namespace MouseWithoutBorders.Lite
         private static string lastSignature;
         private static DateTime lastStatusWrite;
         private static bool keyMismatchNotified;
+        private static bool updateBalloonShown;
+        private static bool balloonClickHooked;
         private static bool olderVersionNotified;
         private static bool statusDirReady;
 
@@ -286,6 +290,11 @@ namespace MouseWithoutBorders.Lite
                 if (timerTicks % 10 != 0)
                 {
                     return; // the rest once a second
+                }
+
+                if (timerTicks % 600 == 0)
+                {
+                    CheckForUpdate(); // the check itself runs at most once a week
                 }
 
                 StatusSnapshot status = LiteStatus.Refresh();
@@ -332,6 +341,30 @@ namespace MouseWithoutBorders.Lite
             {
                 Logger.Log(e);
             }
+        }
+
+        // Weekly update check; the notification opens Settings > About, where Update is.
+        private static void CheckForUpdate()
+        {
+            if (!balloonClickHooked && Common.MainForm?.NotifyIcon != null)
+            {
+                balloonClickHooked = true;
+                Common.MainForm.NotifyIcon.BalloonTipClicked += (_, _) =>
+                {
+                    if (updateBalloonShown)
+                    {
+                        updateBalloonShown = false;
+                        ShowSettings("about");
+                    }
+                };
+                Common.MainForm.NotifyIcon.BalloonTipClosed += (_, _) => updateBalloonShown = false;
+            }
+
+            LiteUpdate.MaybeCheckInBackground(Setting.Values.CheckForUpdates, r => Common.DoSomethingInUIThread(() =>
+            {
+                updateBalloonShown = true;
+                Common.ShowToolTip($"MwbLite {r.Version.ToString(3)} is available (you have {LiteUpdate.CurrentText}). Click here, or open Settings > About, to update.", 15000, ToolTipIcon.Info, true);
+            }));
         }
 
         private static void WriteStatus(StatusSnapshot status, DateTime now)

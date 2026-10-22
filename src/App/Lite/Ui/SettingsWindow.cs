@@ -25,7 +25,7 @@ using WpfMessageBox = System.Windows.MessageBox;
 
 namespace MouseWithoutBorders.Lite.Ui
 {
-    internal sealed class SettingsWindow : Window
+    internal sealed partial class SettingsWindow : Window
     {
         private static readonly (string Label, EasyMouseOption Value)[] EasyMouseChoices =
         {
@@ -49,6 +49,7 @@ namespace MouseWithoutBorders.Lite.Ui
             ("", "Clipboard & files"),
             ("", "Connection"),
             ("", "Advanced"),
+            ("", "About"),
         };
 
         private readonly string settingsPath;
@@ -70,6 +71,16 @@ namespace MouseWithoutBorders.Lite.Ui
         private readonly CheckBox shareClipboard = Kit.Switch();
         private readonly CheckBox transferFile = Kit.Switch();
         private readonly CheckBox showTransferProgress = Kit.Switch();
+
+        // About
+        private readonly CheckBox checkForUpdates = Kit.Switch();
+        private readonly TextBlock updateStatus = new() { FontSize = 16, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
+        private readonly TextBlock updateDetail = Kit.Hint(string.Empty);
+        private readonly TextBox releaseNotes = new() { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, MaxHeight = 220, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 10, 0, 0) };
+        private readonly ProgressBar updateProgress = new() { Height = 4, Maximum = 1, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 10, 0, 0) };
+        private WpfButton checkUpdateButton;
+        private WpfButton updateButton;
+        private ReleaseInfo latestRelease;
 
         // Connection
         private readonly CheckBox startWithWindows = Kit.Switch();
@@ -132,7 +143,7 @@ namespace MouseWithoutBorders.Lite.Ui
                 // Keep the default icon.
             }
 
-            layout.ThisPc = LiteConfig.NormalizeName(Environment.MachineName);
+            layout.ThisPc = ThisPc;
             layoutView = new LayoutEditorView(layout) { Margin = new Thickness(0, 6, 0, 6) };
             layoutView.StateOf = name => LastStatus?.Pcs.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.State;
             checkButton = Kit.Button("Check now", (_, _) => StartCheck(), accent: true);
@@ -155,11 +166,40 @@ namespace MouseWithoutBorders.Lite.Ui
 
         private StatusSnapshot LastStatus { get; set; }
 
+        /// <summary>This PC's name as shown (the README screenshots use a neutral one).</summary>
+        internal static string ThisPc { get; set; } = LiteConfig.NormalizeName(Environment.MachineName);
+
+        /// <summary>Where live status comes from: the running MwbLite's status.json (previews substitute a sample).</summary>
+        internal static Func<StatusSnapshot> StatusSource { get; set; } = () => LiteStatus.ReadLatest(TimeSpan.FromSeconds(20));
+
+        /// <summary>Preview only: shows these check results instead of running the checks.</summary>
+        internal void ShowCheckResults(System.Collections.Generic.IEnumerable<CheckItem> results)
+        {
+            checkResults.Children.Clear();
+            var items = new List<CheckItem>();
+            foreach (CheckItem item in results)
+            {
+                AddResult(item, items);
+            }
+
+            FinishCheck(items);
+        }
+
         internal int PageCount => Pages.Length;
 
         internal string PageName(int index) => Pages[index].Title;
 
         internal void SelectPage(int index) => nav.SelectedIndex = index;
+
+        /// <summary>Opens a page by name ("about", "pcs", …); unknown or null names leave the first page.</summary>
+        internal void SelectPage(string name)
+        {
+            int i = Array.FindIndex(Pages, p => p.Title.Split(' ')[0].Equals(name ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+            if (i >= 0)
+            {
+                nav.SelectedIndex = i;
+            }
+        }
 
         internal void RunCheckForPreview() => StartCheck();
 
@@ -216,7 +256,7 @@ namespace MouseWithoutBorders.Lite.Ui
             brand.Margin = new Thickness(8, 0, 0, 6);
             DockPanel.SetDock(brand, Dock.Top);
             side.Children.Add(brand);
-            var thisPc = Kit.Hint("This PC: " + LiteConfig.NormalizeName(Environment.MachineName));
+            var thisPc = Kit.Hint("This PC: " + ThisPc);
             thisPc.Margin = new Thickness(8, 0, 0, 16);
             DockPanel.SetDock(thisPc, Dock.Top);
             side.Children.Add(thisPc);
@@ -271,7 +311,7 @@ namespace MouseWithoutBorders.Lite.Ui
                     layoutView,
                     Kit.Hint("Drag the PCs to match where they sit. The cursor crosses to a PC by leaving the screen on that side. Double-click to rename or add, Delete to remove. Other PCs follow when you save."))),
                 Kit.Row("", "Wrap the cursor around the outer edges", "Leaving the last PC brings the cursor back to the first.", wrapMouse),
-                Kit.Row("", "Add this PC to the layout", "Puts " + LiteConfig.NormalizeName(Environment.MachineName) + " in the first empty slot.", addThis),
+                Kit.Row("", "Add this PC to the layout", "Puts " + ThisPc + " in the first empty slot.", addThis),
                 Kit.Section("Status"),
                 Kit.Card(pcList));
 
@@ -354,6 +394,8 @@ namespace MouseWithoutBorders.Lite.Ui
                 Kit.Row("", "Allow older versions (not secure)", "Lets PCs without the secure connection (MwbLite before 0.6, PowerToys) connect. Only for a short changeover.", allowInsecure),
                 Kit.Section("Settings file"),
                 Kit.Row("", "settings.json", settingsPath, Kit.Button("Open in Notepad", (_, _) => LiteTray.OpenUserConfigInEditor())));
+
+            pages["About"] = BuildAbout();
         }
 
         private static T WithTopMargin<T>(T element, double top)
@@ -375,7 +417,7 @@ namespace MouseWithoutBorders.Lite.Ui
 
         private void RefreshStatus()
         {
-            LastStatus = LiteStatus.ReadLatest(TimeSpan.FromSeconds(20));
+            LastStatus = StatusSource();
             pcList.Children.Clear();
             if (LastStatus == null)
             {
@@ -415,6 +457,7 @@ namespace MouseWithoutBorders.Lite.Ui
             transferFile.IsChecked = cfg.TransferFile;
             transferFile.IsEnabled = cfg.ShareClipboard;
             showTransferProgress.IsChecked = cfg.ShowTransferProgress;
+            checkForUpdates.IsChecked = cfg.CheckForUpdates;
             startWithWindows.IsChecked = cfg.StartWithWindows;
             useService.IsChecked = cfg.UseService;
 
@@ -459,6 +502,7 @@ namespace MouseWithoutBorders.Lite.Ui
             cfg.ShareClipboard = shareClipboard.IsChecked == true;
             cfg.TransferFile = transferFile.IsChecked == true;
             cfg.ShowTransferProgress = showTransferProgress.IsChecked == true;
+            cfg.CheckForUpdates = checkForUpdates.IsChecked == true;
             cfg.StartWithWindows = startWithWindows.IsChecked == true;
             cfg.UseService = useService.IsChecked == true;
 
@@ -568,7 +612,7 @@ namespace MouseWithoutBorders.Lite.Ui
 
         private void AddThisPc()
         {
-            string me = LiteConfig.NormalizeName(Environment.MachineName);
+            string me = ThisPc;
             if (layout.Slots.Contains(me, StringComparer.OrdinalIgnoreCase))
             {
                 SetMessage(me + " is already in the layout.", ok: true);

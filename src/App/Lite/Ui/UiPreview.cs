@@ -17,7 +17,22 @@ namespace MouseWithoutBorders.Lite.Ui
             Directory.CreateDirectory(dir);
             string sample = Path.Combine(dir, "sample-settings.json");
             var cfg = LiteConfig.CreateDefault();
-            cfg.Machines = new() { "LAPTOP1", LiteConfig.NormalizeName(Environment.MachineName), "TABLET" };
+            // Neutral names and addresses only: these images go in the public README.
+            SettingsWindow.ThisPc = "DESK-PC";
+            SettingsWindow.PreviewMode = true;
+            cfg.Machines = new() { "LAPTOP", "DESK-PC", "TABLET" };
+            SettingsWindow.StatusSource = () => new StatusSnapshot
+            {
+                UpdatedUtc = DateTime.UtcNow,
+                ThisPc = "DESK-PC",
+                ServiceMode = true,
+                Pcs =
+                {
+                    new PcStatus { Name = "LAPTOP", State = PcState.Connected, Address = "192.168.1.21" },
+                    new PcStatus { Name = "DESK-PC", State = PcState.ThisPc },
+                    new PcStatus { Name = "TABLET", State = PcState.Connecting },
+                },
+            };
             cfg.StartWithWindows = true;
             cfg.UseService = true;
             cfg.Save(sample);
@@ -40,8 +55,15 @@ namespace MouseWithoutBorders.Lite.Ui
                     w.SelectPage(i);
                     if (w.PageName(i) == "Connection")
                     {
-                        w.RunCheckForPreview();
-                        Pump(TimeSpan.FromSeconds(12));
+                        w.ShowCheckResults(new[]
+                        {
+                            new CheckItem(CheckResult.Ok, "Settings", "settings.json is valid and has a security key."),
+                            new CheckItem(CheckResult.Ok, "Other PCs", "LAPTOP, TABLET"),
+                            new CheckItem(CheckResult.Ok, "MwbLite running", "Running as a service (it can control the lock screen and UAC prompts)."),
+                            new CheckItem(CheckResult.Ok, "Firewall", "MwbLite is allowed through Windows Firewall on this network (Private)."),
+                            new CheckItem(CheckResult.Ok, "LAPTOP", "Connected (192.168.1.21)."),
+                            new CheckItem(CheckResult.Problem, "TABLET", "Found TABLET (192.168.1.34), but MwbLite isn't answering on ports 15101 and 15100. Make sure MwbLite is running there, and run Check connection on that PC to test its firewall."),
+                        });
                     }
 
                     Pump(TimeSpan.FromMilliseconds(400));

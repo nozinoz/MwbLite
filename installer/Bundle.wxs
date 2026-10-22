@@ -23,7 +23,7 @@
                                               LaunchTarget="[ProgramFiles64Folder]MwbLite\MwbLite.exe"
                                               ShowVersion="yes"
                                               SuppressOptionsUI="yes" />
-      <Payload SourceFile="Assets\banner.png" Name="banner.png" />
+      <Payload SourceFile="$(var.BannerFile)" Name="banner.png" />
       <Payload SourceFile="..\LICENSE" Name="LICENSE.txt" />
     </BootstrapperApplication>
 

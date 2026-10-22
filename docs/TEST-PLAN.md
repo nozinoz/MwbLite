@@ -151,6 +151,10 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 8b.7 | Change something and close the window. | "Save your changes?" Yes saves, No discards, Cancel keeps the window open. | |
 | 8b.8 | In normal mode (no service), change **Wrap the cursor** and Save. | The running MwbLite applies it within a second ("Configuration reloaded" balloon); no Reload needed. | |
 | 8b.9 | Display scaling 150% (Windows Settings > Display), then open Settings and copy a large file. | Settings, the tray icon and the progress window are sharp, not blurry. | |
+| 8b.10 | Run Setup. | The version is on the banner (white "VERSION x.y.z" badge), in the title bar and in the Install heading. | |
+| 8b.11 | Settings > About. | Version and build, details (Copy details works), links open GitHub / the licence / notices. Within a few seconds: "You're up to date" (or the newer version and its notes). | |
+| 8b.12 | **Update:** with a newer release published on GitHub, open About and press **Update now**. | It downloads Setup with a progress bar, Settings closes, Setup opens (UAC), and MwbLite comes back on the new version; About then shows it. | |
+| 8b.13 | **Weekly check:** delete `update.json` next to settings.json (service mode: `%ProgramData%\MwbLite\update.json`, admin) and restart MwbLite while a newer release exists. | Within about a minute a notification says the new version is available; clicking it opens Settings > About. | |
 
 ## 9. Uninstall (optional, if you want to verify clean removal)
 
