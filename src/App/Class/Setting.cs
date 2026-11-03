@@ -232,6 +232,9 @@ namespace MouseWithoutBorders.Class
                 MachineStuff.SendMachineMatrix();
             }
 
+            // MwbLite: every PC needs the same screen alignment; tell the others when it was changed here.
+            LiteAlignmentSync.OnConfigReloaded(last.Advanced.EdgeAlignment, cfg);
+
             LiteLog.Write(nameof(Settings), "Settings reloaded from " + _settingsFile);
             return true;
         }
@@ -315,6 +318,34 @@ namespace MouseWithoutBorders.Class
             lock (_loadingSettingsLock)
             {
                 return (_config.MatrixSlots(), _config.Layout.OneRow, _config.Layout.WrapMouse);
+            }
+        }
+
+        /// <summary>Screen alignment entries (see LiteEdgeAlignment); a snapshot, safe to read from any thread.</summary>
+        internal IReadOnlyList<EdgeAlignmentEntry> EdgeAlignment
+        {
+            get
+            {
+                lock (_loadingSettingsLock)
+                {
+                    return _config.Advanced.EdgeAlignment.ToArray();
+                }
+            }
+        }
+
+        /// <summary>Replaces the entries in memory (a set received from a peer). Returns true if they differ from what was there.</summary>
+        internal bool SetEdgeAlignment(IEnumerable<EdgeAlignmentEntry> entries)
+        {
+            var list = entries.Select(e => e.Clone()).ToList();
+            lock (_loadingSettingsLock)
+            {
+                if (LiteEdgeAlignment.Canonical(_config.Advanced.EdgeAlignment) == LiteEdgeAlignment.Canonical(list))
+                {
+                    return false;
+                }
+
+                _config.Advanced.EdgeAlignment = list;
+                return true;
             }
         }
 

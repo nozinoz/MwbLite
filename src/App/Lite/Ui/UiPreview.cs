@@ -33,6 +33,8 @@ namespace MouseWithoutBorders.Lite.Ui
                     new PcStatus { Name = "TABLET", State = PcState.Connecting },
                 },
             };
+            // Line up screens: DESK-PC has a tall monitor, bigger than LAPTOP's screen; TABLET stays at the default.
+            cfg.Advanced.EdgeAlignment = new() { new EdgeAlignmentEntry { From = "LAPTOP", To = "DESK-PC", Start = -0.45, End = 1.35 } };
             cfg.StartWithWindows = true;
             cfg.UseService = true;
             cfg.Save(sample);
@@ -68,6 +70,16 @@ namespace MouseWithoutBorders.Lite.Ui
 
                     Pump(TimeSpan.FromMilliseconds(400));
                     Save(w, Path.Combine(dir, $"settings-{i + 1}-{w.PageName(i).Split(' ')[0].ToLowerInvariant()}-{suffix}.png"));
+
+                    if (w.PageName(i) == "PCs")
+                    {
+                        // The same page in a taller window: the "Line up screens" card shows in full.
+                        w.Height = 1180;
+                        Pump(TimeSpan.FromMilliseconds(400));
+                        Save(w, Path.Combine(dir, $"settings-{i + 1}b-pcs-line-up-screens-{suffix}.png"));
+                        w.Height = 720;
+                        Pump(TimeSpan.FromMilliseconds(200));
+                    }
                 }
 
                 w.Close();
