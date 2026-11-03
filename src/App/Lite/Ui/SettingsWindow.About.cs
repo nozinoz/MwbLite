@@ -237,7 +237,7 @@ namespace MouseWithoutBorders.Lite.Ui
 
             if (HasUnsavedChanges())
             {
-                SetMessage("Save or undo your changes first, then update.", ok: false);
+                SetMessage("Apply or cancel your changes first, then update.", ok: false);
                 return;
             }
 
@@ -253,7 +253,7 @@ namespace MouseWithoutBorders.Lite.Ui
                 updateStatus.Text = "Starting Setup…";
                 updateDetail.Text = "MwbLite closes while Setup runs, then starts again.";
                 LiteUpdate.RunSetup(setup);
-                closingAfterSave = true; // nothing to save; don't ask
+                skipClosePrompt = true; // nothing to save; don't ask
                 Close();
             }
             catch (OperationCanceledException)

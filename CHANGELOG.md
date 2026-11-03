@@ -3,6 +3,11 @@
 Each version's section is also its GitHub Release notes (see `tools/publish-release.ps1`), and Settings > About
 shows them for the latest release. Upgrade every PC to the same version.
 
+## 0.8.3
+
+- Settings has **Apply**, **Close** and **Cancel**: Apply saves and applies your changes and keeps the window open,
+  Close asks about changes you haven't applied, Cancel discards them.
+
 ## 0.8.2
 
 - **Same mouse speed on every PC is now on by default** for new installs: MwbLite sends the mouse's movement, so

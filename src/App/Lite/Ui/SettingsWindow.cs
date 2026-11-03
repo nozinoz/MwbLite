@@ -120,7 +120,7 @@ namespace MouseWithoutBorders.Lite.Ui
         private LiteConfig loaded;
         private string baseline;
         private bool commentsAcknowledged;
-        private bool closingAfterSave;
+        private bool skipClosePrompt;
 
         private SettingsWindow(string settingsPath, LiteConfig config, Action<LiteConfig> afterSave)
         {
@@ -286,7 +286,11 @@ namespace MouseWithoutBorders.Lite.Ui
 
             // Footer
             var footer = new DockPanel { Margin = new Thickness(28, 10, 32, 16), LastChildFill = true };
-            var buttons = Kit.Horizontal(Kit.Button("Save", (_, _) => SaveAndApply(), accent: true), Kit.Button("Cancel", (_, _) => Close()));
+            // Apply saves and applies but keeps the window open; Close asks about unapplied changes; Cancel discards them.
+            var buttons = Kit.Horizontal(
+                Kit.Button("Apply", (_, _) => Apply(), accent: true),
+                Kit.Button("Close", (_, _) => Close()),
+                Kit.Button("Cancel", (_, _) => CancelAndClose()));
             DockPanel.SetDock(buttons, Dock.Right);
             footer.Children.Add(buttons);
             footer.Children.Add(message);
@@ -309,7 +313,7 @@ namespace MouseWithoutBorders.Lite.Ui
                 Kit.Card(Kit.Stack(
                     Kit.Horizontal(oneRow, twoRows),
                     layoutView,
-                    Kit.Hint("Drag the PCs to match where they sit. The cursor crosses to a PC by leaving the screen on that side. Double-click to rename or add, Delete to remove. Other PCs follow when you save."))),
+                    Kit.Hint("Drag the PCs to match where they sit. The cursor crosses to a PC by leaving the screen on that side. Double-click to rename or add, Delete to remove. Other PCs follow when you apply."))),
                 Kit.Row("", "Wrap the cursor around the outer edges", "Leaving the last PC brings the cursor back to the first.", wrapMouse),
                 Kit.Row("", "Add this PC to the layout", "Puts " + ThisPc + " in the first empty slot.", addThis),
                 Kit.Section("Status"),
@@ -549,7 +553,8 @@ namespace MouseWithoutBorders.Lite.Ui
 
         // ---- actions --------------------------------------------------------------------------------------
 
-        private bool SaveAndApply()
+        /// <summary>Validates, saves and applies the settings; the window stays open. False if nothing was saved.</summary>
+        private bool Apply()
         {
             var cfg = ReadValues();
             var errors = cfg.Validate(out _);
@@ -587,23 +592,29 @@ namespace MouseWithoutBorders.Lite.Ui
 
             loaded = cfg;
             baseline = Canonical(cfg);
-            closingAfterSave = true;
-            Close();
+            SetMessage("Applied.", ok: true);
             afterSave?.Invoke(cfg);
             return true;
+        }
+
+        /// <summary>Closes without saving: unapplied changes are discarded.</summary>
+        private void CancelAndClose()
+        {
+            skipClosePrompt = true;
+            Close();
         }
 
         private void OnClosing(object sender, System.ComponentModel.CancelEventArgs e)
         {
             statusTimer.Stop();
             checkCts?.Cancel();
-            if (closingAfterSave || !HasUnsavedChanges())
+            if (skipClosePrompt || !HasUnsavedChanges())
             {
                 return;
             }
 
-            MessageBoxResult answer = WpfMessageBox.Show(this, "Save your changes?", Title, MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-            if (answer == MessageBoxResult.Cancel || (answer == MessageBoxResult.Yes && !SaveAndApply()))
+            MessageBoxResult answer = WpfMessageBox.Show(this, "Apply your changes before closing?", Title, MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            if (answer == MessageBoxResult.Cancel || (answer == MessageBoxResult.Yes && !Apply()))
             {
                 e.Cancel = true;
                 statusTimer.Start();
@@ -627,7 +638,7 @@ namespace MouseWithoutBorders.Lite.Ui
         {
             if (HasUnsavedChanges())
             {
-                SetMessage("Save your changes first, then pair.", ok: false);
+                SetMessage("Apply your changes first, then pair.", ok: false);
                 return;
             }
 
@@ -820,7 +831,7 @@ namespace MouseWithoutBorders.Lite.Ui
             base.OnKeyDown(e);
             if (e.Key == Key.S && Keyboard.Modifiers == ModifierKeys.Control)
             {
-                _ = SaveAndApply();
+                _ = Apply();
                 e.Handled = true;
             }
             else if (e.Key == Key.Escape)

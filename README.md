@@ -97,7 +97,7 @@ MwbLite starts in the tray. On first run it creates `%LOCALAPPDATA%\MwbLite\sett
 security key and shows a balloon. Left-click the tray icon to open **Settings** (see
 [Settings window](#settings-window)).
 
-**First PC** (e.g. the mini PC): turn on **Start with Windows** (Connection page) and press **Save**. Its random key is the
+**First PC** (e.g. the mini PC): turn on **Start with Windows** (Connection page) and press **Apply**. Its random key is the
 one every PC will use.
 
 **Each other PC**, one at a time, with both PCs on the same network:
@@ -119,7 +119,7 @@ machine names everywhere. See [How pairing works](#how-pairing-works).
 
 ### Lock screen and UAC prompts (service mode)
 
-1. In Settings > Connection, turn on **Control the lock screen and UAC prompts**, press **Save**, and approve the UAC prompt. That copies your
+1. In Settings > Connection, turn on **Control the lock screen and UAC prompts**, press **Apply**, and approve the UAC prompt. That copies your
    settings to `%ProgramData%\MwbLite`, a folder only SYSTEM and Administrators can read (see
    [Security notes](#security-notes)).
 2. Exit MwbLite from the tray and start it again from the Start menu (or sign out and back in).
@@ -202,13 +202,14 @@ sidebar, cards and switches, and light or dark mode following Windows (it uses W
   name-to-IP mappings, the less common switches, **Allow older versions**, and **Open in Notepad**.
 - **About.** Version and details, links, the update status and **Update now** (see
   [Updates and the About page](#updates-and-the-about-page)).
-- **Save** (or Ctrl+S) validates first, using the same checks as Reload config. If something is wrong, the window
-  stays open and the problem is shown in red at the bottom. Otherwise it writes settings.json and the running
-  MwbLite picks it up:
+- **Apply** (or Ctrl+S) validates first, using the same checks as Reload config. If something is wrong, the
+  problem is shown in red at the bottom. Otherwise it writes settings.json, the running MwbLite picks it up, and the
+  window stays open:
   - **Normal mode:** MwbLite notices the saved file and reloads straight away.
   - **Service mode:** a UAC prompt copies it to the service's protected copy.
   - **Service mode turned on but not installed yet:** the window offers the one-time install.
-- Closing with unsaved changes asks whether to save them.
+- **Close** (or Esc) closes the window; if there are changes you haven't applied, it asks whether to apply them.
+  **Cancel** discards them and closes.
 - **Saving rewrites settings.json.** Comments are removed (you're asked first), and the previous file is kept as
   `settings.json.bak`. Values the window doesn't show (e.g. `easyMouseFullscreenExcludedApps`) are kept.
 - **It runs as you, in its own process** (`MwbLite.exe --settings`), never as SYSTEM, in normal and service mode
@@ -219,7 +220,7 @@ sidebar, cards and switches, and light or dark mode following Windows (it uses W
 ## Arranging the PCs
 
 Open Settings and drag the tiles on the **PCs** page until they match where the PCs sit on your desk,
-then press **Save**. The cursor moves to a PC by leaving the screen on that side.
+then press **Apply**. The cursor moves to a PC by leaving the screen on that side.
 
 - **One row:** tiles left to right. With `LAPTOP1, MINIPC, LAPTOP2`, the mini PC's left edge leads to LAPTOP1 and
   its right edge to LAPTOP2.
@@ -291,7 +292,7 @@ Settings > Connection > **Check now** tests, in order:
 The file is JSON. `//` comments and trailing commas are allowed. Three things write it:
 
 - MwbLite creates it when it's missing.
-- The Settings window rewrites it when you press **Save**, or after pairing.
+- The Settings window rewrites it when you press **Apply**, or after pairing.
 - A layout change received from another of your PCs (machines, one row/two rows, wrap) is saved into it.
 
 Each write keeps the previous file as `settings.json.bak`.
