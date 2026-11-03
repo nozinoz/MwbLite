@@ -6,11 +6,27 @@
 //
 //  1. TLS with mutual certificates. Each PC uses a self-signed ECDSA P-256 certificate it made itself (kept in the
 //     running account's certificate store, "MwbLite secure channel"). Certificates are not trusted on their own.
-//  2. Key proof inside TLS: each side sends "MWBL" | version | HMAC-SHA256(K, role | SHA256(client cert) |
-//     SHA256(server cert)), with K = HKDF-SHA256(security key, salt "MwbLite channel v1"). Each checks the other's
-//     (constant time) and answers ok / mismatch. Binding both certificates means a relay in the middle, which has
-//     to present its own certificates to each side, can't produce a valid proof without the key. The key itself
-//     never crosses the network.
+//  2. Key proof inside TLS (protocol v2, MwbLite 0.9). K = PBKDF2-HMAC-SHA256(security key, salt "MwbLite channel
+//     v2", 600,000 iterations). The CLIENT goes first: it sends "MWBL" | 2 | HMAC-SHA256(K, 'C' | SHA256(client
+//     cert) | SHA256(server cert)). The server checks it (constant time). If it is wrong, the server sends one
+//     byte, 0, and hangs up: it never sends a proof of its own, so a stranger who connects without the key,
+//     finishes TLS with a certificate of its own and sends a guess learns nothing it could test guesses against
+//     offline. If it is right, the server answers 1 | "MWBL" | 2 | HMAC(K, 'S' | ...), the client checks that and
+//     sends a last byte (1 ok, 0 mismatch) which the server waits for. Binding both certificates means a relay in
+//     the middle, which has to present its own certificates to each side, can't produce a valid proof without the
+//     key. The key itself never crosses the network.
+//
+//     Why: version 1 (MwbLite 0.6 to 0.8) had both sides send their proof at once and the server accepted any
+//     certificate, so any PC on the LAN got the server's proof, an offline oracle for guessing the key, and
+//     K = HKDF(key) made each guess free. Now a guess costs a PBKDF2 run, and pairing's random 16 character keys
+//     are far out of reach. What remains: a client that connects to an impostor server has already sent its proof,
+//     which lets the impostor guess offline too; with PBKDF2 and a random key that is impractical. Each PC derives
+//     K once per key (cached, warmed when the key is set), so only the first connection pays the ~0.3 s.
+//
+//     v1 peers: a v1 server sends its proof at once, so a v2 client that reads "MWBL" | 1 where it expects a
+//     verdict knows the other PC is older; a v1 client's first message has version 1, which the v2 server
+//     recognises. Both ends report "older version" (InsecurePeerException). The versions can't connect: update
+//     every PC to 0.9.
 //
 // Older peers (MwbLite before 0.6, stock PowerToys MWB) don't speak TLS. A server tells them apart by the first
 // byte (0x16 starts a TLS handshake) and accepts them only when advanced.allowInsecureConnections is on; a client
@@ -18,6 +34,7 @@
 // refused and the PC shows "older version" in the tray and Check connection.
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -53,13 +70,15 @@ namespace MouseWithoutBorders.Lite
         internal const byte TlsHandshakeRecord = 0x16;
         internal const string CertificateName = "MwbLite secure channel";
 
-        private const byte Version = 1;
+        private const byte Version = 2;
+        private const byte VersionOne = 1;
         private const byte VerdictOk = 1;
         private const byte VerdictMismatch = 0;
         private const int ProofLength = 4 + 1 + 32;
+        private const int KeyCacheSize = 4;
 
         private static readonly byte[] Magic = Encoding.ASCII.GetBytes("MWBL");
-        private static readonly byte[] KdfSalt = Encoding.UTF8.GetBytes("MwbLite channel v1");
+        private static readonly byte[] KdfSalt = Encoding.UTF8.GetBytes("MwbLite channel v2");
         /// <summary>How long the TLS handshake and key proof may take (tests shorten it).</summary>
         internal static TimeSpan HandshakeTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
@@ -72,6 +91,15 @@ namespace MouseWithoutBorders.Lite
         private static readonly ConcurrentDictionary<string, DateTime> LegacyPeers = new(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, DateTime> KeyMismatches = new(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, DateTime> InsecureRejected = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly List<(string Key, int Iterations, byte[] Derived)> KeyCache = new();
+        private static readonly object KeyCacheGate = new();
+        private static int pbkdf2Runs;
+
+        /// <summary>PBKDF2 iterations for the channel key. Both PCs must agree; tests lower it.</summary>
+        internal static int Pbkdf2Iterations { get; set; } = 600_000;
+
+        /// <summary>How many times the key derivation really ran (cache misses); for tests.</summary>
+        internal static int Pbkdf2Runs => System.Threading.Volatile.Read(ref pbkdf2Runs);
 
         /// <summary>The certificate this PC presents. Tests replace it.</summary>
         internal static Func<X509Certificate2> Certificate { get; set; } = () => StoreCertificate.Value;
@@ -118,6 +146,7 @@ namespace MouseWithoutBorders.Lite
 
         internal static Stream Establish(Socket socket, bool isClient, string peer, string securityKey)
         {
+            byte[] channelKey = DeriveKey(securityKey); // before the handshake starts; instant once cached
             string address = LiteStatus.Display((socket.RemoteEndPoint as IPEndPoint)?.Address);
             int oldReceive = socket.ReceiveTimeout, oldSend = socket.SendTimeout;
             socket.ReceiveTimeout = socket.SendTimeout = (int)HandshakeTimeout.TotalMilliseconds;
@@ -155,11 +184,19 @@ namespace MouseWithoutBorders.Lite
 
                 try
                 {
-                    ProveKey(ssl, isClient, securityKey);
+                    ProveKey(ssl, isClient, channelKey);
                 }
                 catch (KeyMismatchException)
                 {
                     Remember(KeyMismatches, peer, address);
+                    ssl.Dispose();
+                    throw;
+                }
+                catch (InsecurePeerException)
+                {
+                    // An MwbLite 0.6 to 0.8 speaks TLS but the older proof. It isn't a "legacy" (non-TLS) peer, so no
+                    // fallback to the plain protocol; the tray just says "older version".
+                    Remember(InsecureRejected, peer, address);
                     ssl.Dispose();
                     throw;
                 }
@@ -188,13 +225,14 @@ namespace MouseWithoutBorders.Lite
         /// </summary>
         internal static Stream EstablishStrict(Socket socket, bool isClient, string securityKey)
         {
+            byte[] channelKey = DeriveKey(securityKey);
             int oldReceive = socket.ReceiveTimeout, oldSend = socket.SendTimeout;
             socket.ReceiveTimeout = socket.SendTimeout = (int)HandshakeTimeout.TotalMilliseconds;
             var ssl = new SslStream(new NetworkStream(socket, ownsSocket: false), leaveInnerStreamOpen: false);
             try
             {
                 Authenticate(ssl, isClient);
-                ProveKey(ssl, isClient, securityKey);
+                ProveKey(ssl, isClient, channelKey);
                 return ssl;
             }
             catch (Exception)
@@ -237,7 +275,7 @@ namespace MouseWithoutBorders.Lite
             return first[0] == TlsHandshakeRecord;
         }
 
-        private static void Authenticate(SslStream ssl, bool isClient)
+        internal static void Authenticate(SslStream ssl, bool isClient)
         {
             X509Certificate2 cert = Certificate();
             const SslProtocols protocols = SslProtocols.Tls13 | SslProtocols.Tls12;
@@ -275,34 +313,171 @@ namespace MouseWithoutBorders.Lite
             }
         }
 
-        private static void ProveKey(SslStream ssl, bool isClient, string securityKey)
+        // The key proof, version 2 (see the header): the client proves first; the server answers only to a right proof.
+        private static void ProveKey(SslStream ssl, bool isClient, byte[] channelKey)
         {
             byte[] localCert = ssl.LocalCertificate?.GetRawCertData() ?? throw new AuthenticationException("No local certificate.");
             byte[] remoteCert = ssl.RemoteCertificate.GetRawCertData();
             byte[] clientCert = isClient ? localCert : remoteCert;
             byte[] serverCert = isClient ? remoteCert : localCert;
 
-            byte[] mine = Proof(securityKey, isClient ? (byte)'C' : (byte)'S', clientCert, serverCert);
-            byte[] expected = Proof(securityKey, isClient ? (byte)'S' : (byte)'C', clientCert, serverCert);
+            byte[] mine = Proof(channelKey, isClient ? (byte)'C' : (byte)'S', clientCert, serverCert);
+            byte[] expected = Proof(channelKey, isClient ? (byte)'S' : (byte)'C', clientCert, serverCert);
 
-            ssl.Write(Magic.Concat(new[] { Version }).Concat(mine).ToArray());
+            if (isClient)
+            {
+                ProveAsClient(ssl, mine, expected);
+            }
+            else
+            {
+                ProveAsServer(ssl, mine, expected);
+            }
+        }
+
+        private static void ProveAsClient(SslStream ssl, byte[] mine, byte[] expected)
+        {
+            ssl.Write(ProofMessage(mine));
             ssl.Flush();
 
-            byte[] theirs = ReadExactly(ssl, ProofLength);
-            if (!theirs.AsSpan(0, 4).SequenceEqual(Magic) || theirs[4] != Version)
+            // A v2 server answers a verdict byte first; a v1 server has already sent its own "MWBL" | 1 | proof.
+            int first = ssl.ReadByte();
+            if (first < 0)
             {
-                throw new AuthenticationException("The other PC isn't speaking MwbLite's secure protocol (version " + theirs[4] + ").");
+                throw new IOException("The other PC closed the connection during the key proof.");
             }
 
-            bool theyProved = CryptographicOperations.FixedTimeEquals(theirs.AsSpan(5), expected);
-            ssl.WriteByte(theyProved ? VerdictOk : VerdictMismatch);
-            ssl.Flush();
-            int verdict = ssl.ReadByte();
+            if (first == Magic[0])
+            {
+                byte[] rest = ReadExactly(ssl, 4);
+                if (rest.AsSpan(0, 3).SequenceEqual(Magic.AsSpan(1)) && rest[3] == VersionOne)
+                {
+                    throw new InsecurePeerException("The other PC runs MwbLite before 0.9, which can't connect to this version. Update it.");
+                }
 
-            if (!theyProved || verdict != VerdictOk)
+                throw new AuthenticationException("The other PC isn't speaking MwbLite's secure protocol.");
+            }
+
+            if (first == VerdictMismatch)
             {
                 throw new KeyMismatchException("The security keys don't match.");
             }
+
+            if (first != VerdictOk)
+            {
+                throw new AuthenticationException("The other PC isn't speaking MwbLite's secure protocol.");
+            }
+
+            bool theyProved = CryptographicOperations.FixedTimeEquals(ReadProof(ssl), expected);
+            ssl.WriteByte(theyProved ? VerdictOk : VerdictMismatch);
+            ssl.Flush();
+            if (!theyProved)
+            {
+                throw new KeyMismatchException("The security keys don't match.");
+            }
+        }
+
+        private static void ProveAsServer(SslStream ssl, byte[] mine, byte[] expected)
+        {
+            byte[] theirs = ReadProof(ssl);
+            if (!CryptographicOperations.FixedTimeEquals(theirs, expected))
+            {
+                // Nothing else is sent: a peer without the key learns nothing it could test guesses against.
+                ssl.WriteByte(VerdictMismatch);
+                ssl.Flush();
+                throw new KeyMismatchException("The security keys don't match.");
+            }
+
+            ssl.Write(new[] { VerdictOk }.Concat(ProofMessage(mine)).ToArray());
+            ssl.Flush();
+
+            int verdict = ssl.ReadByte();
+            if (verdict < 0)
+            {
+                throw new IOException("The other PC closed the connection during the key proof.");
+            }
+
+            if (verdict != VerdictOk)
+            {
+                throw new KeyMismatchException("The security keys don't match.");
+            }
+        }
+
+        private static byte[] ProofMessage(byte[] proof) => Magic.Concat(new[] { Version }).Concat(proof).ToArray();
+
+        // Reads "MWBL" | version | proof. Version 1 is an older MwbLite, anything else is not MwbLite.
+        private static byte[] ReadProof(Stream s)
+        {
+            byte[] message = ReadExactly(s, ProofLength);
+            if (!message.AsSpan(0, 4).SequenceEqual(Magic))
+            {
+                throw new AuthenticationException("The other PC isn't speaking MwbLite's secure protocol.");
+            }
+
+            if (message[4] == VersionOne)
+            {
+                throw new InsecurePeerException("The other PC runs MwbLite before 0.9, which can't connect to this version. Update it.");
+            }
+
+            if (message[4] != Version)
+            {
+                throw new AuthenticationException("The other PC isn't speaking MwbLite's secure protocol (version " + message[4] + ").");
+            }
+
+            return message[5..];
+        }
+
+        // ---- the channel key ------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// K = PBKDF2-HMAC-SHA256(security key, salt, <see cref="Pbkdf2Iterations"/>), 32 bytes. The last few keys are
+        /// kept, so only the first connection with a key pays (about 0.3 s).
+        /// </summary>
+        internal static byte[] DeriveKey(string securityKey)
+        {
+            string key = securityKey ?? string.Empty;
+            int iterations = Pbkdf2Iterations;
+            lock (KeyCacheGate) // also stops two connections deriving the same key at once
+            {
+                int at = KeyCache.FindIndex(e => e.Iterations == iterations && e.Key == key);
+                if (at >= 0)
+                {
+                    var hit = KeyCache[at];
+                    KeyCache.RemoveAt(at);
+                    KeyCache.Add(hit); // most recently used last
+                    return hit.Derived;
+                }
+
+                byte[] derived = Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(key), KdfSalt, iterations, HashAlgorithmName.SHA256, 32);
+                System.Threading.Interlocked.Increment(ref pbkdf2Runs);
+                KeyCache.Add((key, iterations, derived));
+                if (KeyCache.Count > KeyCacheSize)
+                {
+                    KeyCache.RemoveAt(0);
+                }
+
+                return derived;
+            }
+        }
+
+        /// <summary>Derives the channel key for a (new) security key in the background, so the first connection doesn't wait for it.</summary>
+        internal static void WarmUp(string securityKey)
+        {
+            if (string.IsNullOrEmpty(securityKey))
+            {
+                return;
+            }
+
+            _ = System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    _ = DeriveKey(securityKey);
+                }
+                catch (Exception e)
+                {
+                    LiteLog.Write(nameof(LiteSecureChannel), "Couldn't prepare the channel key: " + e.Message);
+                }
+            });
         }
 
         internal enum ProbeResult
@@ -319,6 +494,7 @@ namespace MouseWithoutBorders.Lite
         /// </summary>
         internal static async System.Threading.Tasks.Task<ProbeResult> ProbeAsync(IPAddress address, int port, string securityKey, TimeSpan timeout, System.Threading.CancellationToken ct)
         {
+            byte[] channelKey = await System.Threading.Tasks.Task.Run(() => DeriveKey(securityKey)).ConfigureAwait(false);
             using var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
             using var connectTimeout = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ct);
             connectTimeout.CancelAfter(timeout);
@@ -339,12 +515,16 @@ namespace MouseWithoutBorders.Lite
                     try
                     {
                         Authenticate(ssl, isClient: true);
-                        ProveKey(ssl, isClient: true, securityKey);
+                        ProveKey(ssl, isClient: true, channelKey);
                         return ProbeResult.KeyMatches;
                     }
                     catch (KeyMismatchException)
                     {
                         return ProbeResult.KeyMismatch;
+                    }
+                    catch (InsecurePeerException)
+                    {
+                        return ProbeResult.OlderVersion;
                     }
                     catch (AuthenticationException)
                     {
@@ -358,11 +538,13 @@ namespace MouseWithoutBorders.Lite
                 ct).ConfigureAwait(false);
         }
 
-        internal static byte[] Proof(string securityKey, byte role, byte[] clientCert, byte[] serverCert)
+        internal static byte[] Proof(string securityKey, byte role, byte[] clientCert, byte[] serverCert) =>
+            Proof(DeriveKey(securityKey), role, clientCert, serverCert);
+
+        internal static byte[] Proof(byte[] channelKey, byte role, byte[] clientCert, byte[] serverCert)
         {
-            byte[] k = HKDF.DeriveKey(HashAlgorithmName.SHA256, Encoding.UTF8.GetBytes(securityKey ?? string.Empty), 32, KdfSalt);
             byte[] message = new[] { role }.Concat(SHA256.HashData(clientCert)).Concat(SHA256.HashData(serverCert)).ToArray();
-            return HMACSHA256.HashData(k, message);
+            return HMACSHA256.HashData(channelKey, message);
         }
 
         private static byte[] ReadExactly(Stream s, int count)

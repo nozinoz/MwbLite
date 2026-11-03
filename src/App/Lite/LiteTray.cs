@@ -344,7 +344,7 @@ namespace MouseWithoutBorders.Lite
                     if (older != null && !olderVersionNotified)
                     {
                         olderVersionNotified = true;
-                        Common.ShowToolTip($"{older.Name} runs an older MwbLite (or PowerToys), which isn't secure, so it was refused. Update it to this version, or allow older versions in Settings > Advanced.", 10000, ToolTipIcon.Warning, true);
+                        Common.ShowToolTip($"{older.Name} runs an older MwbLite (or PowerToys) that this version can't connect to. Update it to this version.", 10000, ToolTipIcon.Warning, true);
                     }
                     else if (older == null)
                     {

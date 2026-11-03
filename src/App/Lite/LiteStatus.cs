@@ -76,7 +76,7 @@ namespace MouseWithoutBorders.Lite
             PcState.Connected => "Connected",
             PcState.Connecting => "Connecting…",
             PcState.KeyMismatch => "Security key doesn't match",
-            PcState.OlderVersion => "Older version, not secure (refused)",
+            PcState.OlderVersion => "Older version (update it)",
             _ => "Not connected",
         };
 

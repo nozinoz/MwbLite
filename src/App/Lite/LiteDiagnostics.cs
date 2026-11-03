@@ -149,7 +149,7 @@ namespace MouseWithoutBorders.Lite
                     case LiteSecureChannel.ProbeResult.KeyMismatch:
                         return new CheckItem(CheckResult.Problem, pc, $"{where} answers, but its security key is different. Pair the PCs again: Add a PC… here, Join… there.");
                     case LiteSecureChannel.ProbeResult.OlderVersion:
-                        return new CheckItem(CheckResult.Problem, pc, $"{where} runs an older MwbLite (or PowerToys Mouse Without Borders) without the secure connection. Install this version there, or (not recommended) allow older versions in Settings > Advanced on both PCs.");
+                        return new CheckItem(CheckResult.Problem, pc, $"{where} runs an older MwbLite (before 0.9) or PowerToys Mouse Without Borders, which this version can't connect to. Install this version there. (PowerToys can connect if you allow older versions in Settings > Advanced on both PCs; that is not recommended.)");
                     case LiteSecureChannel.ProbeResult.KeyMatches:
                         answering.Address = target;
                         if (filePort && sameSubnet && live?.State != PcState.Connecting)

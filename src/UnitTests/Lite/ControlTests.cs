@@ -43,6 +43,7 @@ public sealed class ControlTests
         originalPort = LiteControl.PortProvider;
         LiteSecureChannel.Certificate = () => cert;
         LiteSecureChannel.SecurityKey = () => ClientKey.Value ?? ServerKey;
+        LiteSecureChannel.Pbkdf2Iterations = 1000; // fast tests; both ends are in this process
         dir = Path.Combine(Path.GetTempPath(), "MwbLiteControlTests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         savedSaveToDisk = LiteAddressBook.SaveToDisk;
@@ -57,6 +58,7 @@ public sealed class ControlTests
         LiteControl.PortProvider = originalPort;
         LiteSecureChannel.Certificate = originalCertificate;
         LiteSecureChannel.SecurityKey = originalKey;
+        LiteSecureChannel.Pbkdf2Iterations = 600_000;
         LiteAddressBook.SaveToDisk = savedSaveToDisk;
         LiteAddressBook.UseFileForTests(null);
         cert.Dispose();

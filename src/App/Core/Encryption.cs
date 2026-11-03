@@ -59,7 +59,11 @@ internal static class Encryption
     internal static string MyKey
     {
         get => Encryption.myKey;
-        set => Encryption.myKey = value;
+        set
+        {
+            Encryption.myKey = value;
+            Lite.LiteSecureChannel.WarmUp(value); // MwbLite: derive the channel key now, not during the first connection
+        }
     }
 
     private static string KeyDisplayedText(string key)

@@ -8,6 +8,9 @@ shows them for the latest release. Upgrade every PC to the same version.
 **Upgrade every PC to 0.9.0.** The new features below use a new connection between MwbLite PCs (TCP port
 `tcpPort+3`, default 15103), so both PCs need 0.9.0 for them. Mouse, keyboard, clipboard and files are unchanged.
 
+- **Stronger connection handshake: 0.9.0 can't connect to 0.8.x or earlier.** The key proof now makes the connecting
+  PC prove first, and a PC without the key learns nothing it could use to guess the key offline; the key is also
+  stretched with PBKDF2. Both PCs show the other as "Older version" until you update it, so update every PC.
 - **Wake a sleeping PC from the tray.** A PC that isn't connected gets a **Wake LAPTOP** item (with its own name)
   in the tray menu. It needs a wired network and "Wake on Magic Packet" turned on in that PC's BIOS and network
   adapter settings; Wi-Fi laptops usually can't be woken. The PC must have been connected to this one once, so its

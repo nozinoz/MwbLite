@@ -501,20 +501,25 @@ key and the same machine list onto every PC *is* pairing. You can do it in two w
 
 1. **TLS 1.3** (1.2 if needed) with a certificate on each side. Each PC makes its own self-signed certificate once
    (ECDSA P-256, in the running account's certificate store as "MwbLite secure channel").
-2. **Key proof** inside TLS. Each side sends an HMAC of both certificates under a key derived from the security
-   key (HKDF-SHA256), and checks the other's. The certificates themselves aren't trusted; the proof is what
-   counts. Because it covers both certificates, a relay in the middle can't pass it without the security key.
-   The key itself never crosses the network after pairing.
+2. **Key proof** inside TLS. The connecting PC goes first: it sends an HMAC of both certificates under a key
+   derived from the security key (PBKDF2-SHA256, 600,000 iterations, derived once per key). The listening PC checks
+   it and only if it is right answers with its own proof, which the first PC checks in turn. A PC without the key
+   gets a single "no" byte and nothing else, so it learns nothing to test key guesses against. The certificates
+   themselves aren't trusted; the proof is what counts. Because it covers both certificates, a relay in the middle
+   can't pass it without the security key. The key itself never crosses the network after pairing.
 
 Only then does upstream MWB's own protocol start, unchanged, inside the tunnel. It still derives its AES-256 key
 from the security key (PBKDF2-SHA512, 100,000 iterations, fresh random salt and IV) and runs its challenge-response
 handshake. A PC with a different key is refused at step 2: the tray and Check connection say "Security key doesn't
 match".
 
-**Older versions.** MwbLite before 0.6 and PowerToys' Mouse Without Borders don't do step 1 or 2, so by default
-they are refused, and the tray shows them as "Older version, not secure". **Update every PC** to the same version.
-If you must mix versions for a while, tick **Allow older versions (not secure)** under Advanced on the new PCs:
-those connections then have only upstream's protection.
+**Older versions.** MwbLite 0.9.0 changed step 2 (the first versions' proof let a stranger on the network test
+guesses of the key offline), so **0.9.0 can't connect to 0.8.x or earlier**: both PCs show the other as "Older
+version" and the tray says to update it. **Update every PC** to the same version. MwbLite before 0.6 and PowerToys'
+Mouse Without Borders don't do step 1 or 2 at all, so by default they are refused too.
+If you must mix PowerToys or MwbLite before 0.6 for a while, tick **Allow older versions (not secure)** under
+Advanced on the new PCs: those connections then have only upstream's protection. (That option does not help with
+MwbLite 0.6 to 0.8, which speak TLS; update those.)
 
 **Staying connected.** MwbLite reconnects by itself when a PC wakes from sleep, when its network changes (new
 Wi-Fi, new IP address, a cable plugged in) and when a peer vanishes. Each connection uses TCP keepalive, so a PC
@@ -662,7 +667,8 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
   small-office network. PCs on different subnets or VLANs, or connected over a VPN (e.g. Tailscale), need a
   wider firewall rule, added by an administrator.
 - **x64 only.** Windows on ARM PCs would run the x64 build under emulation; that is untested.
-- **Doesn't connect to PowerToys MWB or MwbLite before 0.6** unless **Allow older versions** is ticked; see
+- **Doesn't connect to MwbLite 0.8.x or earlier** (0.9.0 changed the key proof; update every PC), **nor to
+  PowerToys MWB or MwbLite before 0.6** unless **Allow older versions** is ticked; see
   [How pairing works](#how-pairing-works). With it ticked, mixed setups use upstream's protocol and should work, but
   this has not been tested against PowerToys.
 - **A little extra CPU per connection:** each connection does a TLS handshake (a few milliseconds), and every
