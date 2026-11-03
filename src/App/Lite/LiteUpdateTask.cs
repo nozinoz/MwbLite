@@ -27,10 +27,11 @@ namespace MouseWithoutBorders.Lite
         internal const string Arguments = "--install-update";
 
         /// <summary>
-        /// SYSTEM and Administrators: full control. Authenticated Users: read and execute, which is what starting the
-        /// task takes, so the signed-in user's MwbLite can run it without elevation.
+        /// SYSTEM and Administrators: full control. Interactive users (those signed in at the console or over Remote
+        /// Desktop, not services or network logons): read and execute, which is what starting the task takes, so the
+        /// signed-in user's MwbLite can run it without elevation.
         /// </summary>
-        internal const string SecurityDescriptor = "D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;AU)";
+        internal const string SecurityDescriptor = "D:(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;IU)";
 
         // Task Scheduler enumerations (taskschd.h).
         private const int TaskCreateOrUpdate = 6;

@@ -66,7 +66,9 @@ namespace MouseWithoutBorders.Lite
         private static readonly TimeSpan LegacyMemory = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan EventMemory = TimeSpan.FromMinutes(2);
 
-        private static readonly Lazy<X509Certificate2> StoreCertificate = new(LoadOrCreateStoreCertificate);
+        // PublicationOnly: a failure (store locked, profile not loaded yet) is not cached, so the next call tries again.
+        private static readonly Lazy<X509Certificate2> StoreCertificate = new(LoadOrCreateStoreCertificate, System.Threading.LazyThreadSafetyMode.PublicationOnly);
+        private static readonly object CertificateGate = new();
         private static readonly ConcurrentDictionary<string, DateTime> LegacyPeers = new(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, DateTime> KeyMismatches = new(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, DateTime> InsecureRejected = new(StringComparer.OrdinalIgnoreCase);
@@ -375,6 +377,14 @@ namespace MouseWithoutBorders.Lite
         // One certificate per Windows account (the user, or SYSTEM in service mode), kept in that account's "My"
         // store so the key isn't recreated on every start. Windows' TLS stack needs a stored (not ephemeral) key.
         private static X509Certificate2 LoadOrCreateStoreCertificate()
+        {
+            lock (CertificateGate) // PublicationOnly lets threads race; only one may create the certificate
+            {
+                return LoadOrCreateStoreCertificateLocked();
+            }
+        }
+
+        private static X509Certificate2 LoadOrCreateStoreCertificateLocked()
         {
             using var store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
             store.Open(OpenFlags.ReadWrite);

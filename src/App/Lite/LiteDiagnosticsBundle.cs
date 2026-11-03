@@ -6,7 +6,8 @@
 //
 // Collecting never fails as a whole: anything missing or unreadable (the service's folder is administrators-only, for
 // instance) becomes a line in summary.txt, and the rest is still saved. The security key never leaves the PC in
-// the zip: RedactSettings works on the text, so it also covers a file that is not valid JSON.
+// the zip: settings.json goes through RedactSettings (which parses the JSON, and falls back to patterns on the text
+// for a file that is not valid JSON), and the key's own text is replaced in every file added, logs included.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -17,6 +18,7 @@ using System.Linq;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -26,6 +28,10 @@ namespace MouseWithoutBorders.Lite
     internal static class LiteDiagnosticsBundle
     {
         internal const string Redacted = "<redacted>";
+        internal const string KeyRemoved = "[security key removed]";
+
+        // A shorter "key" would also match ordinary words in a log, so it is left alone.
+        private const int MinKeyLengthToScrub = 8;
 
         private static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(45);
         private static readonly TimeSpan NetshTimeout = TimeSpan.FromSeconds(30);
@@ -51,13 +57,113 @@ namespace MouseWithoutBorders.Lite
         private static readonly Regex DpapiValue = new("\"" + Regex.Escape(LiteKeyProtection.Prefix) + "(?:[^\"\\\\]|\\\\.)*\"", RegexOptions.CultureInvariant);
 
         /// <summary>
-        /// settings.json with the security key (plain or "dpapi:...") and every other "dpapi:" value replaced. Done on the
-        /// text, so comments, formatting and even a file with syntax errors come through otherwise unchanged.
+        /// settings.json with the security key (plain or "dpapi:...") and every other "dpapi:" value replaced. The JSON
+        /// is read with a tokenizer, so escaped names and values are recognised too, and only those tokens are replaced in
+        /// the original text: comments and formatting come through unchanged. A file that is not valid JSON is redacted
+        /// by patterns on the text instead.
         /// </summary>
         internal static string RedactSettings(string text)
         {
-            text = KeyValue.Replace(text ?? string.Empty, "$1\"" + Redacted + "\"");
+            text ??= string.Empty;
+            try
+            {
+                return RedactParsed(text);
+            }
+            catch (JsonException)
+            {
+                return RedactByPattern(text);
+            }
+        }
+
+        private static string RedactParsed(string text)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(text);
+            var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+            var edits = new List<(int Start, int Length, string Replacement)>();
+            bool keyValueNext = false;
+            while (reader.Read())
+            {
+                JsonTokenType type = reader.TokenType;
+                if (type == JsonTokenType.PropertyName)
+                {
+                    keyValueNext = string.Equals(reader.GetString(), "securityKey", StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+
+                bool isKey = keyValueNext;
+                keyValueNext = false;
+                int start = (int)reader.TokenStartIndex;
+                if (type == JsonTokenType.String)
+                {
+                    int length = reader.ValueSpan.Length + 2; // the raw text between the quotes, plus the quotes
+                    if (isKey)
+                    {
+                        edits.Add((start, length, "\"" + Redacted + "\""));
+                    }
+                    else if (reader.GetString().StartsWith(LiteKeyProtection.Prefix, StringComparison.Ordinal))
+                    {
+                        edits.Add((start, length, "\"" + LiteKeyProtection.Prefix + Redacted + "\""));
+                    }
+                }
+                else if (isKey && type is JsonTokenType.Number or JsonTokenType.True or JsonTokenType.False)
+                {
+                    edits.Add((start, reader.ValueSpan.Length, "\"" + Redacted + "\""));
+                }
+            }
+
+            if (edits.Count == 0)
+            {
+                return text;
+            }
+
+            using var result = new MemoryStream(bytes.Length);
+            int at = 0;
+            foreach ((int Start, int Length, string Replacement) in edits)
+            {
+                result.Write(bytes, at, Start - at);
+                byte[] insert = Encoding.UTF8.GetBytes(Replacement);
+                result.Write(insert, 0, insert.Length);
+                at = Start + Length;
+            }
+
+            result.Write(bytes, at, bytes.Length - at);
+            return Encoding.UTF8.GetString(result.GetBuffer(), 0, (int)result.Length);
+        }
+
+        private static string RedactByPattern(string text)
+        {
+            text = KeyValue.Replace(text, "$1\"" + Redacted + "\"");
             return DpapiValue.Replace(text, "\"" + LiteKeyProtection.Prefix + Redacted + "\"");
+        }
+
+        /// <summary>
+        /// <paramref name="text"/> with the literal text of each security key (those of at least 8 characters) replaced by
+        /// "[security key removed]". For files that aren't settings.json: logs, status, the connection check.
+        /// </summary>
+        internal static string RemoveKeys(string text, IEnumerable<string> keys)
+        {
+            foreach (string key in (keys ?? Enumerable.Empty<string>()).Where(k => k != null && k.Length >= MinKeyLengthToScrub).Distinct(StringComparer.Ordinal).OrderByDescending(k => k.Length))
+            {
+                text = text.Replace(key, KeyRemoved, StringComparison.Ordinal);
+            }
+
+            return text;
+        }
+
+        // The key in the settings being collected, and the one the running engine uses (they differ while an edit is pending).
+        private static string[] KeysToRemove(LiteConfig cfg)
+        {
+            string engineKey = null;
+            try
+            {
+                engineKey = LiteSecureChannel.SecurityKey();
+            }
+            catch (Exception e) when (e is NullReferenceException or TypeInitializationException)
+            {
+                // not running in the engine: no key there
+            }
+
+            return new[] { cfg?.SecurityKey, engineKey }.Where(k => !string.IsNullOrEmpty(k)).ToArray();
         }
 
         // ---- text of the other items ----------------------------------------------------------------------
@@ -147,18 +253,20 @@ namespace MouseWithoutBorders.Lite
         {
             var notes = new List<string>();
             var included = new List<string>();
+            string[] keys = KeysToRemove(cfg);
             string tmp = zipPath + ".tmp";
             try
             {
                 using (var stream = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
                 using (var zip = new ZipArchive(stream, ZipArchiveMode.Create))
                 {
-                    void AddText(string entry, string text)
+                    // Every text goes through RemoveKeys, so the key can't get in through a log line or a status field.
+                    void AddText(string entry, string text, DateTimeOffset? written = null)
                     {
                         ZipArchiveEntry e = zip.CreateEntry(entry, CompressionLevel.Optimal);
-                        e.LastWriteTime = DateTimeOffset.Now;
+                        e.LastWriteTime = written ?? DateTimeOffset.Now;
                         using Stream s = e.Open();
-                        byte[] bytes = new UTF8Encoding(false).GetBytes(text);
+                        byte[] bytes = new UTF8Encoding(false).GetBytes(RemoveKeys(text, keys));
                         s.Write(bytes, 0, bytes.Length);
                         included.Add(entry);
                     }
@@ -169,19 +277,9 @@ namespace MouseWithoutBorders.Lite
                         try
                         {
                             using var src = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                            if (transform != null)
-                            {
-                                using var reader = new StreamReader(src, Encoding.UTF8);
-                                AddText(entry, transform(reader.ReadToEnd()));
-                            }
-                            else
-                            {
-                                ZipArchiveEntry e = zip.CreateEntry(entry, CompressionLevel.Optimal);
-                                e.LastWriteTime = File.GetLastWriteTime(path);
-                                using Stream s = e.Open();
-                                src.CopyTo(s);
-                                included.Add(entry);
-                            }
+                            using var reader = new StreamReader(src, Encoding.UTF8);
+                            string text = reader.ReadToEnd();
+                            AddText(entry, transform == null ? text : transform(text), File.GetLastWriteTime(path));
                         }
                         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
                         {

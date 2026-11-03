@@ -233,7 +233,19 @@ namespace MouseWithoutBorders.Lite
             return new JsonObject { ["entries"] = array };
         }
 
-        /// <summary>Reads and checks a received request. Throws ArgumentException if anything is wrong.</summary>
+        internal const int MaxNameLength = 64;
+
+        /// <summary>
+        /// True for a name that can be a Windows computer name or DNS label: 1 to 64 letters, digits, '-', '_' and '.'.
+        /// Names received from another PC must pass this; they end up in settings.json and on a command line.
+        /// </summary>
+        internal static bool IsValidPcName(string name) =>
+            !string.IsNullOrEmpty(name) && name.Length <= MaxNameLength && name.All(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.');
+
+        /// <summary>
+        /// Reads and checks a received request. Entries whose PC names are not valid names are dropped. Throws
+        /// ArgumentException if anything else is wrong (including more than <see cref="MaxEntries"/> entries).
+        /// </summary>
         internal static List<EdgeAlignmentEntry> FromJson(JsonObject request)
         {
             if (request?["entries"] is not JsonArray array || array.Count > MaxEntries)
@@ -253,6 +265,11 @@ namespace MouseWithoutBorders.Lite
                         Start = (double)node["start"],
                         End = (double)node["end"],
                     };
+
+                    if (!IsValidPcName(e.From) || !IsValidPcName(e.To))
+                    {
+                        continue; // a peer must not be able to put arbitrary text into our settings
+                    }
 
                     if (Problem(e) is string problem)
                     {

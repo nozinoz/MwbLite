@@ -89,6 +89,87 @@ namespace MouseWithoutBorders.Lite
         /// <summary>As <see cref="EnsureProtectedDirectory"/>, plus read access for Users (for the status file).</summary>
         internal static void EnsureReadableDirectory(string path) => EnsureDirectory(path, usersCanRead: true);
 
+        /// <summary>
+        /// For a folder the SYSTEM updater is about to use under %ProgramData%\MwbLite: first removes whatever an ordinary
+        /// user could have planted there (see <see cref="RemoveUntrustedDirectory"/>), then
+        /// <see cref="EnsureProtectedDirectory"/>. Without this, a junction or symbolic link made there beforehand
+        /// would send SYSTEM's writes (the download, the staged program, the log) to a folder of the attacker's choice.
+        /// </summary>
+        internal static void EnsureTrustedDirectory(string path, bool requireTrustedOwner)
+        {
+            if (RemoveUntrustedDirectory(path, requireTrustedOwner))
+            {
+                LiteLog.Write(nameof(LitePaths), "Removed " + path + ", which was a link, a file, or not owned by SYSTEM or Administrators; it is created again.");
+            }
+
+            EnsureProtectedDirectory(path);
+        }
+
+        /// <summary>
+        /// Removes <paramref name="path"/> if it is a reparse point (junction or symbolic link: the link itself goes, never
+        /// the folder it points to), a file instead of a folder, or, with <paramref name="requireTrustedOwner"/>, a folder
+        /// that isn't owned by SYSTEM or Administrators. Returns true if something was removed; false if the path is
+        /// missing or fine as it is.
+        /// </summary>
+        internal static bool RemoveUntrustedDirectory(string path, bool requireTrustedOwner)
+        {
+            FileAttributes attributes;
+            try
+            {
+                attributes = File.GetAttributes(path); // describes a link itself, it doesn't follow it
+            }
+            catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return false;
+            }
+
+            if ((attributes & FileAttributes.Directory) == 0)
+            {
+                File.Delete(path); // a file (or a file link) where the folder belongs
+                return true;
+            }
+
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                Directory.Delete(path, recursive: false); // removes the link only
+                return true;
+            }
+
+            if (requireTrustedOwner && !HasTrustedOwner(path))
+            {
+                Directory.Delete(path, recursive: true); // links inside are removed, not followed
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Removes a folder and what is in it; if <paramref name="path"/> is itself a link, only the link.</summary>
+        internal static void DeleteDirectoryOrLink(string path)
+        {
+            if (!RemoveUntrustedDirectory(path, requireTrustedOwner: false) && Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+
+        /// <summary>SYSTEM and the Administrators group are the owners a folder under %ProgramData%\MwbLite may have.</summary>
+        internal static bool IsTrustedOwner(SecurityIdentifier owner) =>
+            owner != null && (owner.IsWellKnown(WellKnownSidType.LocalSystemSid) || owner.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid));
+
+        private static bool HasTrustedOwner(string path)
+        {
+            try
+            {
+                var owner = new DirectoryInfo(path).GetAccessControl(AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+                return IsTrustedOwner(owner);
+            }
+            catch (Exception e) when (e is UnauthorizedAccessException or IOException or InvalidOperationException or PlatformNotSupportedException)
+            {
+                return false; // can't tell who owns it: don't trust it
+            }
+        }
+
         private static void EnsureDirectory(string path, bool usersCanRead)
         {
             var security = new DirectorySecurity();

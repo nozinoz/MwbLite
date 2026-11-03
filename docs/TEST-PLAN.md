@@ -6,6 +6,7 @@
 - **A**: the mini PC with the keyboard and mouse.
 - **B**: a laptop.
 - Add the second laptop as **C** at the end, if you like.
+- Sections 8c and 8d cover 0.9.0 and need **both PCs on 0.9.0**; parts of 8d need a release newer than 0.9.0.
 
 Record each result in the **Result** column of each table (✅ pass / ❌ fail / note).
 
@@ -153,14 +154,78 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 8b.9 | Display scaling 150% (Windows Settings > Display), then open Settings and copy a large file. | Settings, the tray icon and the progress window are sharp, not blurry. | |
 | 8b.10 | Run Setup. | The version is on the banner (white "VERSION x.y.z" badge), in the title bar and in the Install heading. | |
 | 8b.11 | Settings > About. | Version and build, details (Copy details works), links open GitHub / the licence / notices. Within a few seconds: "You're up to date" (or the newer version and its notes). | |
-| 8b.12 | **Update:** with a newer release published on GitHub, open About and press **Update now**. | It downloads Setup with a progress bar, Settings closes, Setup opens (UAC), and MwbLite comes back on the new version; About then shows it. | |
+| 8b.12 | **Update (without the update task, e.g. a portable copy):** with a newer release published on GitHub, open About and press **Update now**. | It downloads Setup with a progress bar, Settings closes, Setup opens (UAC), and MwbLite comes back on the new version; About then shows it. (With Setup installed, see 8d.6: no prompt.) | |
 | 8b.13 | **Weekly check:** delete `update.json` next to settings.json (service mode: `%ProgramData%\MwbLite\update.json`, admin) and restart MwbLite while a newer release exists. | Within about a minute a notification says the new version is available; clicking it opens Settings > About. | |
+
+## 8c. Version 0.9.0: control connection, Wake, lock/sleep all, screen alignment, notices, diagnostics
+
+Needs **A** and **B** both on 0.9.0 (or later), paired and connected. Examples use `DESK-PC` for A and `LAPTOP` for B.
+
+| # | Step | Expected | Result |
+|---|---|---|---|
+| 8c.1 | **Control connection:** on A, Settings > Connection > **Check now**. | Next to B's row there is an extra row "MwbLite control channel (LAPTOP)": ✓ "LAPTOP answers on port 15103". | |
+| 8c.2 | `netstat -ano \| findstr :15103` on A and on B. | One MwbLite process is listening on 15103 on each PC (in service mode only the instance that owns the active desktop). | |
+| 8c.3 | **Older peer (optional):** put MwbLite 0.8.4 on B and run Check connection on A. | The control channel row is a **warning**: "LAPTOP doesn't answer on port 15103. It probably runs an older MwbLite…". Mouse, keyboard and clipboard still work. **Lock all PCs** on A locks only A: B can't be asked. | |
+| 8c.4 | **Wrong key:** Reset pairing on B (Advanced), then run Check connection on A. | B is "Security key doesn't match" as in 5c.3; the control channel is a warning (different key or no answer). Pair again afterwards. | |
+| 8c.5 | **Firewall:** `netsh advfirewall firewall show rule name=MwbLite` on a PC installed with Setup. | The rule allows the program (all TCP ports) from LocalSubnet, so 15103 is reachable. For a portable copy after `--install`, the rule's LocalPort list includes `tcpPort+3` (15103). | |
+| 8c.6 | **Other port:** set `advanced.tcpPort` to 15200 on both PCs, restart MwbLite on both. Then try 65533. | They connect and the control channel answers on 15203. Settings refuses 65533 with a red message ("between 1024 and 65532"). Set it back to 15100 afterwards. | |
+| 8c.7 | **Lock all PCs:** on A, tray menu > **Lock all PCs**. | B locks first, then A. Unlock both. Repeat with B in service mode (7.1), where the lock still reaches the signed-in user. | |
+| 8c.8 | **Lock all, B not connected:** turn B's Wi-Fi/cable off, wait for B to show *Not connected*, then **Lock all PCs** on A. | Only A locks. No error. | |
+| 8c.9 | **Sleep all PCs:** tray menu > **Sleep all PCs…** on A, answer **No**, then again and answer **Yes**. | No: nothing happens. Yes: B goes to sleep, then A. Wake both with the keyboard or power button; they reconnect (as in 5.2). | |
+| 8c.10 | **Learning addresses:** with B connected for 10 s or more, open `%LOCALAPPDATA%\MwbLite\addresses.json` on A (service mode: the one under the account that owns the tray you use). | There is an entry `"mac:LAPTOP"` with one or more `AA-BB-CC-DD-EE-FF` addresses next to the IP entries. | |
+| 8c.11 | **Wake menu:** with B connected, open A's tray menu. Then disconnect B (sleep it). | While B is connected there is no *Wake* item for it. Once B shows *Not connected*, **Wake LAPTOP** appears below the PC list, above *Lock all PCs*. A PC whose address was never learned (never connected) has no Wake item. | |
+| 8c.12 | **Wake from sleep (wired):** B on Ethernet, "Wake on Magic Packet" on in its adapter and BIOS. Put B to sleep, click **Wake LAPTOP** on A. | A balloon says a wake-up signal was sent. B wakes within about a minute and A shows it *Connected* without further action (A redials B every few seconds for two minutes). Note the time: _____ s | |
+| 8c.13 | **Wake from shut down / hibernate (optional):** repeat 8c.12 with B shut down, if the BIOS allows. | Same, or note that it doesn't wake. | |
+| 8c.14 | **Wi-Fi laptop in Modern Standby (optional):** repeat 8c.12 with a Wi-Fi-only laptop. | It usually does **not** wake. Note the result; this is the documented limitation. | |
+| 8c.15 | **No Wake-on-LAN setup:** repeat 8c.12 with "Wake on Magic Packet" off in the adapter. | B stays asleep, and A shows it *Not connected* (nothing crashes; the balloon says only that a signal was sent). | |
+| 8c.16 | **Line up screens, layout:** Settings > PCs > **Line up screens**, with A and B side by side. | One card for the pair, with a diagram of the two screens, **Position** and **Size** sliders, **Reset** and **Use real sizes**. With no neighbours (one PC), a hint says to put two PCs next to each other. | |
+| 8c.17 | **Edit and apply** (B to the right of A): drag B's screen in the diagram so it sits on the lower half of A's right edge (Position about 0.5, Size about 0.5), press **Apply**. On A, cross to B at the very top of A's edge, at the middle, and at the very bottom. | The top and middle of A's edge both come out at the **top** of B; below the middle the position rises proportionally; the bottom of A comes out at the bottom of B. (Before: top to top, middle to middle.) | |
+| 8c.18 | **Both directions:** from B, cross back to A at B's top, middle and bottom. | B's top edge comes out at the **middle** of A's edge, B's bottom edge at the bottom of A, B's middle in between. Crossing A to B and back at the same spot returns to roughly the same height. | |
+| 8c.19 | **Use real sizes:** with both PCs connected, press **Use real sizes**. | After a moment the row says "Lined up to scale: DESK-PC is ... mm tall, LAPTOP ... mm. Apply to save." The span is centred and its size matches the screens' physical heights. Apply and cross to check. | |
+| 8c.20 | **Use real sizes, B off:** turn B off or off the network and open the page. | The button is disabled with a reason ("LAPTOP isn't connected…"). | |
+| 8c.21 | **Reset:** press **Reset**, **Apply**. | Crossing behaves as before 8c.17 (top to top, proportional). The `advanced.edgeAlignment` entry is gone from settings.json. | |
+| 8c.22 | **Other PCs follow:** apply a changed alignment on A. Open Settings > PCs on B (no restart), then restart MwbLite on B and look again. Check B's settings.json. | B shows the same span both times, and its settings.json has `advanced.edgeAlignment` with the same values. Crossing from B to A uses it. | |
+| 8c.23 | **Service mode receiver:** repeat 8c.22 with B in service mode. | Same; B's own (user) settings.json gets the entry, and the SYSTEM instance uses it. | |
+| 8c.24 | **PC off while applying:** with B off, change the alignment on A and apply; start B. | B keeps its old alignment until you press Apply on A again. | |
+| 8c.25 | **Two rows (2 × 2):** put B below A and open Line up screens. | The card describes B along A's bottom edge. Setting a span and applying moves where the cursor comes out horizontally when crossing down and back up. | |
+| 8c.26 | **Layout change:** after setting a span for A-B, drag B so it is no longer A's neighbour (or remove it) and press **Apply**. | The A-B entry is dropped from settings.json. | |
+| 8c.27 | **Bad value:** in settings.json set an entry's `start` and `end` equal, save, **Reload config** (or Apply the Settings window after editing). | A red message names `advanced.edgeAlignment[0]`; Settings opens on the PCs page. Nothing changes until the file is fixed. | |
+| 8c.28 | **Notices on:** (default) with A and B connected, pull B's network cable or turn its Wi-Fi off. | After about 20 s a balloon on A says "LAPTOP disconnected". Restore the network: "LAPTOP is back" when it reconnects. | |
+| 8c.29 | **Short drop:** turn B's Wi-Fi off for about 10 s and back on. | If B reconnects within 20 s, there is no balloon at all. | |
+| 8c.30 | **Quiet period:** restart MwbLite on A with B off. Then switch B on within 2 minutes; also sleep and wake A once. | No "disconnected" or "is back" balloons for B in the first 2 minutes after the start, or after A resumes. A PC that was never connected since MwbLite started is never reported. | |
+| 8c.31 | **Switch off:** untick **Tell me when a PC connects or drops off** (Settings > Connection), Apply, repeat 8c.28. | No balloons. Tray icon and tooltip still change as usual. Tick it again afterwards. | |
+| 8c.32 | **Save diagnostics:** Settings > About > **Save diagnostics…**. | A Save dialog opens on the Desktop with `MwbLite-diagnostics-<PC>-<date>-<time>.zip`. After saving, Explorer opens with the file selected, and Settings says "Diagnostics saved." (or says how many items couldn't be included). | |
+| 8c.33 | **Open the zip.** | It has the logs, status, settings.json, the update state, the address book, the Check connection results, version/Windows/network information, the firewall rules that mention MwbLite, and `summary.txt`. settings.json shows `"securityKey": "<redacted>"` and no `dpapi:` values; search the whole zip for your key (Advanced > Show) to be sure it isn't there. In a session that can't read `%ProgramData%\MwbLite`, `summary.txt` says which items were left out. | |
+| 8c.34 | **Cancel:** press **Save diagnostics…** and cancel the dialog. | Nothing is saved; no message. | |
+| 8c.35 | **Portable build:** run `dist\portable\MwbLite.exe` (about 74 MB; `MwbLite.Helper.exe` next to it) on a PC without MwbLite installed. | Starts, tray icon appears, Settings opens (a little slower and using more memory than the installed build). Check connection works. | |
+
+## 8d. Version 0.9.0: updates without a UAC prompt, automatic updates, update together
+
+Parts of this can only be tested once **a release newer than 0.9.0 is published** on GitHub (for example 0.9.1): 0.9.0 itself is installed with the old flow. Install 0.9.0 with Setup on A and B first. Run the task checks (8d.1 to 8d.5) right after installing.
+
+| # | Step | Expected | Result |
+|---|---|---|---|
+| 8d.1 | **Task exists after install:** in an admin prompt, `schtasks /query /tn "MwbLite Update" /v /fo list`. | The task exists. Run As User: SYSTEM. Task To Run: `"C:\Program Files\MwbLite\MwbLite.exe" --install-update` (or similar). In Task Scheduler it has no triggers. | |
+| 8d.2 | **Upgrade keeps it:** run a Setup of the same or a newer version over an installed copy; query the task again. | The task is still there. | |
+| 8d.3 | **Standard user can start it:** as a standard (non-admin) user, `schtasks /run /tn "MwbLite Update"`. With no newer release, check `%ProgramData%\MwbLite\logs\update.log` as an admin. | The command succeeds with **no UAC prompt**. update.log shows the task started, found no newer release and stopped; nothing is installed. | |
+| 8d.4 | **Standard user can't change it:** as a standard user, `schtasks /delete /tn "MwbLite Update" /f` and `schtasks /change /tn "MwbLite Update" /disable`. | Both fail with Access denied. | |
+| 8d.5 | **No task without Setup:** run the portable exe, or install with `MwbLite.exe --install`, and query the task. | No task. Settings > About: **Install updates automatically** is greyed out with the explanation "Only when MwbLite was installed with Setup". | |
+| 8d.6 | **Update now, no UAC:** with a newer release published, open About as a **standard user** and press **Update now**. | "Installing 0.9.x… MwbLite will restart." No UAC prompt. After a short time Settings closes, MwbLite comes back in the tray **running as you, not elevated** (Task Manager > Details), About shows the new version, and your settings are kept. In service mode, MwbLite starts the service again as at every sign-in (7.4). | |
+| 8d.7 | **update.log:** as an admin, open `%ProgramData%\MwbLite\logs\update.log`. | Lines for the check, the download into `%ProgramData%\MwbLite\update`, the SHA-256 check, Setup's exit code (0) and the restart of MwbLite. | |
+| 8d.8 | **Failed update (optional):** press **Update now** and disconnect the network straight away. | After a while Settings says "The update didn't finish" and points at update.log; MwbLite stays on the old version and keeps running. | |
+| 8d.9 | **Uninstall removes it:** after 9.1, `schtasks /query /tn "MwbLite Update"`. | "The system cannot find the file specified": the task is gone. (An upgrade does not remove it.) | |
+| 8d.10 | **Automatic updates:** on A tick **Install updates automatically** (About), Apply; delete `update.json` next to settings.json and restart MwbLite while a newer release exists. | Within about a minute a balloon says "Updating MwbLite to 0.9.x… MwbLite will restart." and MwbLite restarts on the new version, with no prompt. With the switch off (default) the balloon only says a new version is available. | |
+| 8d.11 | **Automatic needs the weekly check:** untick **Check for updates every week**, restart. | No check and no automatic update happens. | |
+| 8d.12 | **Update together:** A and B on 0.9.0, **Update together with my other PCs** on (default) on both. Update **only A** to the newer release (Update now). | Within about a minute of A reconnecting to B, B starts updating by itself: a balloon "Updating MwbLite to 0.9.x… (DESK-PC already runs it.)" and B restarts on the new version. Both PCs end on the same version and reconnect. | |
+| 8d.13 | **Without the task:** repeat 8d.12 with B running a portable copy. | B only shows "DESK-PC runs MwbLite 0.9.x. Open Settings > About to update." | |
+| 8d.14 | **Switch off:** untick **Update together with my other PCs** on B, repeat 8d.12 from the start. | B does not update by itself. Re-enable it afterwards. | |
+| 8d.15 | **winget (not yet submitted):** follow `packaging/winget/README.md` to make the manifest for the release (`tools\make-winget-manifest.ps1`). | Three files in `out\winget\<version>\`, and `winget validate` passes. | |
 
 ## 9. Uninstall (optional, if you want to verify clean removal)
 
 | # | Step | Expected | Result |
 |---|---|---|---|
-| 9.1 | Settings > Apps > Installed apps > MwbLite > Uninstall, approve UAC. | The service, firewall rule, `C:\Program Files\MwbLite`, the Start menu shortcuts, `%ProgramData%\MwbLite` and the start-with-Windows entry are removed. `%LOCALAPPDATA%\MwbLite` stays. | |
+| 9.1 | Settings > Apps > Installed apps > MwbLite > Uninstall, approve UAC. | The service, firewall rule, the "MwbLite Update" scheduled task, `C:\Program Files\MwbLite`, the Start menu shortcuts, `%ProgramData%\MwbLite` and the start-with-Windows entry are removed. `%LOCALAPPDATA%\MwbLite` stays. | |
 
 ## Troubleshooting
 

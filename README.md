@@ -37,7 +37,7 @@ Output in `dist\`:
 |---|---|---|
 | `MwbLite-Setup-<version>.exe` | ~8 MB | **The installer.** Double-click it on each PC. Installs the .NET Desktop Runtime first if the PC needs it. |
 | `MwbLite-<version>-x64.msi` | ~7 MB | The app package alone, for silent or scripted installs on PCs that already have the .NET 10 Desktop Runtime: `msiexec /i MwbLite-<version>-x64.msi /qn` |
-| `portable\MwbLite.exe`, `portable\MwbLite.Helper.exe` | ~177 MB each | Run without installing (see [Portable use](#portable-use-no-installer)). |
+| `portable\MwbLite.exe`, `portable\MwbLite.Helper.exe` | ~74 MB each | Run without installing (see [Portable use](#portable-use-no-installer)). |
 | `SHA256SUMS.txt` | | Hashes of all of the above. |
 
 Artwork and screenshots are generated from code, so they stay consistent:
@@ -59,8 +59,10 @@ Microsoft's installer (about 57 MB), checks its SHA-512, and runs it. Windows Up
 patched, and uninstalling MwbLite leaves it in place for other apps. To move to a newer .NET 10 patch, run
 `tools\update-runtime-pin.ps1` and build.
 
-Each portable exe carries its own .NET runtime, so they are large. Neither build is compressed in memory: as
-built, MwbLite uses about 27 MB + 15 MB of private memory, compared with about 32 MB + 17 MB for PowerToys' MWB.
+Each portable exe carries its own .NET runtime, so they are large, and since 0.9.0 they are compressed (about
+74 MB each instead of 178 MB). The price is that a compressed exe is inflated into private memory when it starts:
+measured on the Settings window, about 80 MB more RAM and 70 ms more start time. The installed (framework-dependent)
+build is not compressed, so installing with Setup is unchanged.
 
 ## Install
 
@@ -82,13 +84,17 @@ MwbLite**. Setup:
 - adds **MwbLite** and **MwbLite Settings** to the Start menu;
 - registers the **MwbLite.Service** Windows service (demand start; local users may start and stop it), used for
   lock screen and UAC prompt control;
-- adds inbound Windows Firewall rules for `MwbLite.exe`, from the **local subnet** only: TCP (MWB and pairing) and UDP 15102 (finding PCs for pairing);
+- adds inbound Windows Firewall rules for `MwbLite.exe`, from the **local subnet** only: TCP (MWB, MwbLite's own
+  control connection and pairing) and UDP 15102 (finding PCs for pairing). See [Ports and firewall](#ports-and-firewall);
+- adds the **MwbLite Update** scheduled task, which lets you install updates without a UAC prompt (see
+  [Updates and the About page](#updates-and-the-about-page));
 - turns on **Start with Windows** for you if the box was ticked (from the command line: `StartWithWindows=0` to
   leave it off);
 - closes running copies of MwbLite first, so re-running a newer Setup **upgrades in place** and keeps your
   settings.
 
-**Uninstall** removes all of that, plus `%ProgramData%\MwbLite` and your start-with-Windows entry. Your own
+**Uninstall** removes all of that (including the update task), plus `%ProgramData%\MwbLite` and your
+start-with-Windows entry. Your own
 settings in `%LOCALAPPDATA%\MwbLite` are kept.
 
 ### First-time setup: pair with a code
@@ -135,8 +141,9 @@ From then on, at sign-in:
 
 Copy `dist\portable\` anywhere and run `MwbLite.exe`. Windows Firewall will ask on first run; allow
 **private networks**. For service mode without Setup, run `MwbLite.exe --install` (UAC). It copies the exes to
-`C:\Program Files\MwbLite`, registers the service, adds firewall rules (TCP `tcpPort`, `tcpPort+1` and 15102, UDP 15102) from the local
-subnet, and copies your settings to `%ProgramData%`. `MwbLite.exe --uninstall` removes it again. These two
+`C:\Program Files\MwbLite`, registers the service, adds firewall rules (TCP `tcpPort`, `tcpPort+1`, `tcpPort+3` and 15102, UDP 15102) from the
+local subnet, and copies your settings to `%ProgramData%`. It does not add the update task, so updating a portable
+copy still asks for UAC. `MwbLite.exe --uninstall` removes it again. These two
 commands do nothing on a PC where Setup installed MwbLite.
 
 ### Commands
@@ -151,6 +158,9 @@ commands do nothing on a PC where Setup installed MwbLite.
 | `MwbLite.exe --uninstall` | UAC | Portable only: remove what `--install` added. |
 | `MwbLite.exe --service` | — | Service entry point. The Service Control Manager uses this; don't run it by hand. |
 | `MwbLite.exe --set-layout …` | — | Internal: a service-mode instance uses it to save a layout received from another PC into your settings.json. |
+| `MwbLite.exe --set-alignment …` | — | Internal: the same for a screen alignment received from another PC. |
+| `MwbLite.exe --register-update-task`, `--unregister-update-task` | SYSTEM | Internal: Setup runs these to add and remove the **MwbLite Update** task. |
+| `MwbLite.exe --install-update` | SYSTEM | Internal: what the **MwbLite Update** task runs; installs the newest release (see [Updates](#updates-and-the-about-page)). |
 
 ### Tray menu
 
@@ -160,6 +170,9 @@ commands do nothing on a PC where Setup installed MwbLite.
 - **Exit.**
 - **Your PCs.** Below Exit, every PC in the layout with its state: *This PC*, *Connected*, *Connecting…*, *Not
   connected* or *Security key doesn't match*. Click a connected PC to move the mouse and keyboard there.
+- **Wake LAPTOP** (with each PC's own name). Below the list, one item for each PC that isn't connected and whose
+  network card address MwbLite knows. It sends a Wake-on-LAN signal (see [Waking, locking and sleeping PCs](#waking-locking-and-sleeping-pcs)).
+- **Lock all PCs** and **Sleep all PCs…** lock or sleep every connected PC and this one. Sleep asks first.
 
 The icon is two screens, drawn white or black to match your taskbar, with a **status dot**:
 
@@ -173,7 +186,8 @@ The icon is two screens, drawn white or black to match your taskbar, with a **st
 A small blue dot at the top left means a clipboard or file copy is under way, and a red outline means "control all
 PCs" mode is on. Hover over the icon for a summary ("MwbLite – 2 of 3 PCs connected", one line per PC, or the file
 being copied and how far it has got). If a PC is rejected because its security key is different, or because it
-runs an older version, a notification says so once.
+runs an older version, a notification says so once. A PC that was connected and then stays gone for 20 seconds also
+gets a notification, and another when it is back (see [Connection notices](#connection-notices)).
 
 ![Tray icons](docs/tray-icons.png)
 
@@ -187,7 +201,9 @@ sidebar, cards and switches, and light or dark mode following Windows (it uses W
 - **PCs.** Your PCs as tiles in MWB's 4 slots, each with its live state (green Connected, amber Connecting, red
   otherwise), plus a status list. **Drag a PC** onto another slot to move it there; it swaps with whatever is in
   that slot. **One row** places them left to right; **Two rows (2 × 2)** turns the slots into a grid (`[1][2]`
-  over `[3][4]`) for a PC above or below another. **Wrap the cursor** and **Add this PC** are here too.
+  over `[3][4]`) for a PC above or below another. **Wrap the cursor** and **Add this PC** are here too, and below
+  them **Line up screens** for neighbours whose screens differ in size (see
+  [Lining up screens of different sizes](#lining-up-screens-of-different-sizes)).
   - Double-click a tile or an empty slot to rename or add a PC; press Delete to remove one. The right-click menu
     does the same.
   - Keyboard: the arrow keys select a slot, Ctrl+arrows move the selected PC, and F2 renames.
@@ -195,13 +211,15 @@ sidebar, cards and switches, and light or dark mode following Windows (it uses W
 - **Pairing.** **Add a PC…** / **Join…** to pair with a code (see
   [First-time setup](#first-time-setup-pair-with-a-code)).
 - **Clipboard & files.** Clipboard, file transfer and the copy progress window.
-- **Connection.** Start with Windows, service mode, and **Check connection** with its results on the page (see
+- **Connection.** Start with Windows, service mode, **Tell me when a PC connects or drops off** (see
+  [Connection notices](#connection-notices)), and **Check connection** with its results on the page (see
   [Check connection](#check-connection)).
 - **Advanced.** The **security key** (set by pairing; **Show**, **Copy** and **Reset pairing…**, which makes a new
   key so this PC stops working with the others until they're paired again), port, Easy Mouse, hotkeys,
   name-to-IP mappings, the less common switches, **Allow older versions**, and **Open in Notepad**.
-- **About.** Version and details, links, the update status and **Update now** (see
-  [Updates and the About page](#updates-and-the-about-page)).
+- **About.** Version and details, links, **Save diagnostics…**, the update status and **Update now**, and the
+  switches **Check for updates every week**, **Install updates automatically** and **Update together with my other
+  PCs** (see [Updates and the About page](#updates-and-the-about-page)).
 - **Apply** (or Ctrl+S) validates first, using the same checks as Reload config. If something is wrong, the
   problem is shown in red at the bottom. Otherwise it writes settings.json, the running MwbLite picks it up, and the
   window stays open:
@@ -235,6 +253,48 @@ then press **Apply**. The cursor moves to a PC by leaving the screen on that sid
 - **Keyboard:** Ctrl+Alt+F1…F4 jump to the PC in slot 1…4. To use Ctrl+Alt+1…4 instead, change "Switch to PC"
   under advanced settings.
 - **Only two shapes:** MWB supports a row of up to 4 or a 2×2 grid, not free-form positions.
+
+### Lining up screens of different sizes
+
+MWB maps the cursor's position along the shared edge proportionally: the top of one screen lands on the top of the
+next. With a tall monitor next to a small laptop screen that sits lower on the desk, that isn't where the cursor
+should come out. Settings > PCs > **Line up screens** has one row for each pair of neighbouring PCs in the layout:
+
+- A diagram shows the two screens side by side (or stacked, in the 2 × 2 layout). **Drag** the second screen along
+  the first one's edge and **drag its ends** to resize it, or use the **Position** and **Size** sliders (also the
+  way to do it from the keyboard).
+- **Use real sizes** asks both PCs for the physical size of their primary screen (as Windows reports it) and sets
+  the second screen to its true size relative to the first, centred on it. It is only offered while both PCs are
+  connected and run 0.9.0 or later.
+- **Reset** goes back to MWB's proportional mapping.
+- Nothing is saved until **Apply**. The entries are stored in settings.json under `advanced.edgeAlignment`, and
+  pairs that are no longer neighbours in the layout are dropped.
+- **Other PCs follow.** In the default relative mouse mode the PC the cursor is on works out where it comes out, so
+  every PC needs the same entries. Apply sends them to the connected PCs, which save them. A PC that is off at that
+  moment keeps its old entries until you apply again.
+
+Each PC counts as one screen here too, as in [Arranging the PCs](#arranging-the-pcs): the entries apply to the
+edges of its whole desktop.
+
+## Waking, locking and sleeping PCs
+
+These use MwbLite's own control connection (see [Ports and firewall](#ports-and-firewall)), so **every PC involved
+needs 0.9.0 or later**.
+
+- **Lock all PCs** locks every connected PC, then this one. **Sleep all PCs…** asks first, then puts every connected
+  PC to sleep (not hibernate), then this one. Both are in the tray menu. In service mode the lock is run as the
+  signed-in user.
+- **Wake LAPTOP** (the PC's own name) sends a Wake-on-LAN "magic packet" to a PC that isn't connected, then redials it every few seconds for
+  two minutes so it connects as soon as it is up. The item appears only for a PC whose network card (MAC) address is
+  known. MwbLite learns it while the PC is connected: from the PC itself (0.9.0 or later), or, for an older MwbLite,
+  from the ARP cache. It is kept in `addresses.json` next to settings.json. So a PC must have been connected to this
+  one once before it can be woken. The addresses are kept per Windows account: in service mode, the SYSTEM tray and
+  your own learn them separately.
+- **Wake-on-LAN needs the sleeping PC's network card to be listening.** That is usually **wired Ethernet** with
+  **Wake on Magic Packet** turned on in the adapter's driver settings (Device Manager > the adapter's properties)
+  and in the BIOS/UEFI. **Wi-Fi laptops in Modern Standby usually can't be woken.** The packet is a UDP broadcast
+  (ports 9 and 7) on the local network, so the sleeping PC has to be on the same subnet. MwbLite can't tell whether
+  the PC woke: if it did, it shows up as connected.
 
 ## Copying files between PCs
 
@@ -282,11 +342,38 @@ Settings > Connection > **Check now** tests, in order:
    **Fix firewall…** (one UAC prompt) replaces every inbound rule for MwbLite with MwbLite's own allow rules.
 4. **Each PC:** connected now? If not: can its name be found, is it on this subnet, does MwbLite answer on its
    two ports, and does it run this version with the same security key? (It opens a secure connection and runs the
-   key proof, so the answer is definite, then hangs up.)
+   key proof, so the answer is definite, then hangs up.) For a PC that answers, it also checks MwbLite's control
+   connection on `tcpPort+3` (used for Wake, Lock all PCs and Sleep all PCs); a PC that doesn't answer there usually
+   runs an older MwbLite and gets a warning.
 
 ![Check connection](docs/check-connection.png)
 
 **Copy results** puts the report on the clipboard. Run it on both PCs when two of them won't connect.
+
+## Connection notices
+
+With **Tell me when a PC connects or drops off** on (Settings > Connection; on by default, `notifyConnectionChanges`),
+a notification appears when a PC that was connected has been gone for 20 seconds, and another when it is back. Short
+drops that reconnect by themselves, such as a Wi-Fi blip, say nothing, and neither does a PC that was never
+connected (for instance one that is switched off). There are no notices for the first 2 minutes after MwbLite starts
+or this PC suspends or resumes, when everything is reconnecting.
+
+## Ports and firewall
+
+| Port | Used for |
+|---|---|
+| TCP `tcpPort` (15100) | MWB clipboard and files |
+| TCP `tcpPort+1` (15101) | MWB input and control |
+| TCP `tcpPort+3` (15103) | MwbLite's control connection: who-are-you, Wake addresses, lock, sleep, screen sizes, screen alignment, update announcements. Added in 0.9.0. |
+| TCP and UDP 15102 | Pairing (UDP finds PCs that are in "Add a PC" mode) |
+| UDP 9 and 7, outbound | Wake-on-LAN broadcast |
+
+The control connection is secured like MWB's: TLS with each PC's own certificate, then the security-key proof, with
+no fallback. A PC without 0.9.0 doesn't listen on it, and the features above then report that the PC didn't answer.
+Setup's firewall rule allows all TCP ports of `MwbLite.exe` from the local subnet, so it already covers the control
+port; `--install` adds `tcpPort+3` to its rule. `tcpPort` can be at most 65532 so that `tcpPort+3` is valid. A
+customised firewall rule that lists ports one by one needs `tcpPort+3` added. Check connection tests the control
+port for each PC it can reach (a warning, not an error, if a PC doesn't answer there: mouse and keyboard still work).
 
 ## Configuration: `%LOCALAPPDATA%\MwbLite\settings.json`
 
@@ -316,6 +403,10 @@ next to it.
   "showTransferProgress": true,
   "startWithWindows": true,
   "useService": true,
+  "notifyConnectionChanges": true,
+  "checkForUpdates": true,
+  "installUpdatesAutomatically": false,
+  "updateWithOtherPcs": true,
   "advanced": {
     "tcpPort": 15100,
     "hideMouseAtScreenEdge": true,
@@ -331,6 +422,7 @@ next to it.
     "disableEasyMouseWhenForegroundWindowIsFullscreen": true,
     "easyMouseFullscreenExcludedApps": [],
     "name2Ip": ["LAPTOP1 192.168.1.21"],
+    "edgeAlignment": [{ "from": "MINIPC", "to": "LAPTOP2", "start": 0.2, "end": 0.8 }],
     "hotkeys": {
       "switchMachine": "F1",
       "toggleEasyMouse": "Win+Ctrl+Alt+E",
@@ -349,11 +441,16 @@ next to it.
 | `layout.oneRow` | `true` | `true`: machines left-to-right. `false`: 2×2 grid, row by row (`[0][1]` over `[2][3]`). |
 | `layout.wrapMouse` | `true` | Leaving the last screen wraps the cursor to the first. |
 | `shareClipboard` | `true` | Sync clipboard text and images. |
-| `transferFile` | `true` | Copy or drag files between PCs, up to 100 MB, single file. Requires `shareClipboard`. Received files go to a `MouseWithoutBorders` folder on the desktop. |
+| `transferFile` | `true` | Copy or drag files between PCs, up to 100 MB for copy and paste. Requires `shareClipboard`. Received files go to a `MouseWithoutBorders` folder on the desktop. |
 | `showTransferProgress` | `true` | Show the file copy progress window (with Cancel) and a notification when a copy finishes or fails. |
 | `startWithWindows` | `false` | Adds or removes a per-user `HKCU\…\Run` entry. **Required for service mode** to start at logon. |
 | `useService` | `false` | Use MwbLite.Service, so MWB controls the lock screen, Ctrl+Alt+Del and UAC prompts. Needs `--install`. Takes effect after a restart. |
-| `advanced.tcpPort` | `15100` | MWB uses `tcpPort` (clipboard and files) and `tcpPort+1` (input and control). Must match on every PC. Takes effect after a restart. |
+| `notifyConnectionChanges` | `true` | Notify when a PC that was connected has been gone for 20 seconds, and when it is back (see [Connection notices](#connection-notices)). |
+| `checkForUpdates` | `true` | Ask GitHub once a week whether a new version is out (see [Updates](#updates-and-the-about-page)). |
+| `installUpdatesAutomatically` | `false` | When the weekly check finds a new version, install it without asking. Only works if MwbLite was installed with Setup (the update task). |
+| `updateWithOtherPcs` | `true` | Update this PC when a connected PC announces a newer MwbLite, and tell connected PCs that run an older one. Only ever installs the latest GitHub release. |
+| `advanced.tcpPort` | `15100` | MWB uses `tcpPort` (clipboard and files) and `tcpPort+1` (input and control); MwbLite's control connection uses `tcpPort+3`. 1024 to 65532. Must match on every PC. Takes effect after a restart. |
+| `advanced.edgeAlignment` | `[]` | Where a PC's screen sits along its neighbour's edge, per pair: `from` is the left (upper) PC, `to` the right (lower) one, `start` and `end` are fractions of the `from` edge (0 = top or left, 1 = bottom or right; a bigger screen goes below 0 or above 1). No entry means 0 to 1, MWB's own mapping. Set it in Settings > PCs > Line up screens; it is kept the same on every PC. |
 | `advanced.validateRemoteIp` | `false` | Reverse-DNS check of connecting machines. |
 | `advanced.sameSubnetOnly` | `false` | Only connect to machines on the same subnet. |
 | `advanced.name2Ip` | `[]` | Static `"NAME IP"` mappings, used when name resolution is unreliable. |
@@ -375,7 +472,10 @@ file and reload. `tcpPort` and `useService` changes need a restart: Exit, then s
 | `%LOCALAPPDATA%\MwbLite\status.json` | Live connection and copy status, read by Check connection (normal mode). No secrets. |
 | `%ProgramData%\MwbLite\status\status.json` | The same, written by the service-mode instance. The only part of `%ProgramData%\MwbLite` that users can read. |
 | `%LOCALAPPDATA%\MwbLite\logs\` | `mwblite.log`, `helper.log`, `commands.log` (4 MB cap each, one `.1` rollover). |
+| `%LOCALAPPDATA%\MwbLite\addresses.json` | The last address each PC was reached at, and the network card addresses used for Wake-on-LAN. |
 | `%ProgramData%\MwbLite\` | Service mode: protected copy of settings.json, state.json, and logs (`mwblite-system.log`, `service.log`, `install.log`). SYSTEM and Administrators only. |
+| `%ProgramData%\MwbLite\logs\update.log` | What the **MwbLite Update** task did (checks, download, installer exit code). Administrators only. |
+| `%ProgramData%\MwbLite\update\` | Where the update task downloads Setup to (SYSTEM and Administrators only). |
 | `C:\Program Files\MwbLite\` | Installed binaries (`--install`). |
 
 ## How pairing works
@@ -533,9 +633,17 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
   The exchange uses ECDH (P-256) with a hash commitment and AES-256-GCM, built from .NET's own cryptography. An
   attacker on the network gets one guess in a million at making both screens match. `Add a PC` accepts one PC per
   session, for up to 5 minutes. See [How pairing works](#how-pairing-works).
+- **Control connection (0.9.0):** MwbLite's own requests (lock, sleep, screen sizes and alignment, update
+  announcements) travel over `tcpPort+3` with the same TLS and security-key proof as MWB's connections, with no
+  fallback. Anyone with the key could already control the PCs; it adds that they can lock or sleep them.
+- **The update task** runs `MwbLite.exe` from `C:\Program Files\MwbLite` as SYSTEM, and is only registered for that
+  copy. It takes no input from the user who starts it, installs only what GitHub publishes as the latest release,
+  and verifies the download's SHA-256 on the handle it then runs. A PC that is told about a newer version by another
+  PC does not trust that PC for anything but the version number.
 - **Outbound calls:** only to the MWB peers you configure, plus a weekly update check (one HTTPS request to
   GitHub's API for the latest release; nothing about you or the PC is sent beyond a `MwbLite/<version>` user
-  agent). Switch it off under Settings > About. No telemetry or crash reporting.
+  agent) and, when you update, the download from GitHub. Switch the weekly check off under Settings > About. No
+  telemetry or crash reporting. Wake-on-LAN sends a UDP broadcast on your local network.
 
 ## Known limitations
 
@@ -559,8 +667,15 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
   this has not been tested against PowerToys.
 - **A little extra CPU per connection:** each connection does a TLS handshake (a few milliseconds), and every
   message is encrypted twice (TLS, then MWB's own AES). The messages are small; the cost isn't noticeable.
-- **Updates install with Setup.** Settings > About > Update now downloads and runs the new Setup, which asks
-  for UAC approval like the first install.
+- **Updates without a prompt need Setup.** Only a copy installed with Setup has the **MwbLite Update** task. A
+  portable copy, or one installed with `--install`, downloads Setup and asks for UAC like the first install.
+- **0.9.0 features need 0.9.0 on both PCs.** Waking, Lock all / Sleep all, reading screen sizes, screen alignment
+  sent to other PCs and updating together use the control connection, which older versions don't have. Mouse,
+  keyboard, clipboard and files are unchanged. The update features take effect
+  from the release after 0.9.0, since 0.9.0 is installed with the old update flow.
+- **Wake-on-LAN is best effort.** It needs a wired connection and Wake on Magic Packet, and a PC on the same
+  subnet; Wi-Fi laptops in Modern Standby usually can't be woken. See
+  [Waking, locking and sleeping PCs](#waking-locking-and-sleeping-pcs).
 - **Notepad is always used** by "Open config file", not your default `.json` editor.
 
 ## Updates and the About page
@@ -574,9 +689,43 @@ and third-party notices. **Copy details** puts all of it on the clipboard, handy
 **Update check.** About shows whether you're up to date. Once a week (switch: **Check for updates every week**)
 MwbLite asks GitHub for the latest release; if it's newer, a notification says so, and clicking it opens About.
 **Update now** downloads that release's `MwbLite-Setup-<version>.exe` over HTTPS, checks its size and SHA-256
-against the digest GitHub publishes for it (or the release's `SHA256SUMS.txt`), and starts it. Setup asks for UAC
-approval, stops MwbLite, upgrades it in place and keeps your settings. Do the same on every PC: they must run the
-same version.
+against the digest GitHub publishes for it (or the release's `SHA256SUMS.txt`), and installs it, keeping your
+settings. Every PC must run the same version.
+
+**With Setup: no UAC prompt (0.9.0 and later).** Setup adds an on-demand scheduled task, **MwbLite Update**, that
+runs `MwbLite.exe --install-update` as SYSTEM. Only SYSTEM and Administrators can change it, but any signed-in user
+can start it, and it takes no input from whoever starts it: all it does is install the newest release published on
+GitHub, after checking the download against the SHA-256 GitHub reports for it. **Update now** starts that task, MwbLite
+restarts as you, unelevated, and there is no administrator prompt. The task:
+
+- downloads Setup to `%ProgramData%\MwbLite\update`, a folder only SYSTEM and Administrators can write, then locks the
+  file, checks it once more and runs it silently, so the file that was checked is the file that runs;
+- stops if the latest release isn't newer than what is installed, and runs one update at a time;
+- writes what it did, including Setup's exit code, to `%ProgramData%\MwbLite\logs\update.log` (administrators can
+  read it). If **Update now** finishes without the version changing, look there.
+
+A copy that wasn't installed with Setup (portable, or `--install`) has no task; **Update now** then downloads Setup
+to your temp folder and runs it, with the usual UAC prompt. Setup creates the task on install and upgrade and removes
+it on uninstall. Installing 0.9.0 itself still uses the old flow, so the task is first used for the release after
+0.9.0.
+
+**Install updates automatically** (About; off by default, `installUpdatesAutomatically`). When the weekly check finds
+a newer release, MwbLite starts the update task by itself and a notification says it is updating and will restart. It
+needs "Check for updates every week" and the task, so it is greyed out on copies that weren't installed with Setup.
+
+**Update together with my other PCs** (About; on by default, `updateWithOtherPcs`). PCs must run the same version to
+connect, so when a PC that this one connects to runs an older MwbLite that has the control connection (0.9.0 or
+later), this one tells it which version it has, at most once an hour per PC. A PC that receives this uses the sender
+only for the version number: it asks GitHub itself whether a release that new exists and, only then, runs its normal
+update. Nothing the other PC names is downloaded or run. Without the task, it shows a notification that points at
+Settings > About instead.
+
+**Save diagnostics…** (About) writes one zip file of what's needed to work out why PCs don't connect: the logs, the
+connection status, settings.json with the security key and other `dpapi:` values removed, the update state, the
+address book (PC names, IP addresses and network card addresses), the Check connection results, the MwbLite and
+Windows versions, network adapters and the Windows Firewall rules that mention MwbLite. Anything it can't read, such
+as the service's folder without administrator rights, is listed in `summary.txt` inside the zip, and the rest is
+still saved. Nothing is sent anywhere; look through the zip before attaching it to a public issue.
 
 **Publishing a release** (maintainers): bump `<Version>` in `Directory.Build.props`, add its section to
 `CHANGELOG.md`, run `build.cmd`, commit and push, then:
@@ -586,7 +735,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\publish-release.ps1
 ```
 
 It creates the GitHub Release `v<version>` with Setup, the MSI and `SHA256SUMS.txt`, using the changelog section
-as its notes. Installed copies see it at their next check.
+as its notes. Installed copies see it at their next check. To publish it to winget as well, see
+[packaging/winget/README.md](packaging/winget/README.md) (winget, not yet submitted).
 
 ## Sharing MwbLite with other people
 

@@ -221,6 +221,52 @@ public sealed class DiagnosticsBundleTests
     }
 
     [TestMethod]
+    public void RedactionParsesTheJsonSoEscapesAndNestingCannotHideAValue()
+    {
+        // The pattern fallback can't see these: an escaped property name, an escaped "dpapi:", a key that isn't a string.
+        string json = $$"""
+            {
+              "secur\u0069tyKey": "{{Secret}}",
+              "nested": { "list": ["dpapi\u003a{{Blob}}", "plain"], "SECURITYKEY": 12345678 },
+              "note": "securityKey is \"{{Secret}}\" here", // a comment, kept
+              "tcpPort": 15100,
+            }
+            """;
+
+        string redacted = LiteDiagnosticsBundle.RedactSettings(json);
+
+        Assert.IsFalse(redacted.Contains(Blob, StringComparison.Ordinal));
+        Assert.IsTrue(redacted.Contains("\"secur\\u0069tyKey\": \"<redacted>\"", StringComparison.Ordinal));
+        Assert.IsTrue(redacted.Contains("[\"dpapi:<redacted>\", \"plain\"]", StringComparison.Ordinal));
+        Assert.IsTrue(redacted.Contains("\"SECURITYKEY\": \"<redacted>\"", StringComparison.Ordinal));
+        Assert.IsFalse(redacted.Contains("12345678", StringComparison.Ordinal));
+        Assert.IsTrue(redacted.Contains("// a comment, kept", StringComparison.Ordinal));
+        Assert.IsTrue(redacted.Contains("\"tcpPort\": 15100,", StringComparison.Ordinal), "everything else is byte for byte as it was");
+
+        // Non-ASCII text before a replaced value must not shift the replacement.
+        string accented = "{ \"name\": \"Büro-PC ✓\", \"securityKey\": \"" + Secret + "\", \"x\": 1 }";
+        Assert.AreEqual("{ \"name\": \"Büro-PC ✓\", \"securityKey\": \"<redacted>\", \"x\": 1 }", LiteDiagnosticsBundle.RedactSettings(accented));
+
+        Assert.AreEqual("{}", LiteDiagnosticsBundle.RedactSettings("{}"));
+    }
+
+    [TestMethod]
+    public void TheKeyIsRemovedFromAnyTextButShortOrEmptyKeysAreLeftAlone()
+    {
+        string log = $"connect with {Secret}\r\nagain {Secret} and {Secret}{Secret}";
+
+        string cleaned = LiteDiagnosticsBundle.RemoveKeys(log, new[] { Secret });
+
+        Assert.IsFalse(cleaned.Contains(Secret, StringComparison.Ordinal));
+        Assert.AreEqual("connect with [security key removed]\r\nagain [security key removed] and [security key removed][security key removed]", cleaned);
+
+        Assert.AreEqual("a short1 key", LiteDiagnosticsBundle.RemoveKeys("a short1 key", new[] { "short1" }), "under 8 characters");
+        Assert.AreEqual("abcdefg1", LiteDiagnosticsBundle.RemoveKeys("abcdefg1", new[] { "", null!, "abcdefg" }));
+        Assert.AreEqual("[security key removed]", LiteDiagnosticsBundle.RemoveKeys("abcdefg1", new[] { "abcdefg1" }), "8 characters is enough");
+        Assert.AreEqual("same", LiteDiagnosticsBundle.RemoveKeys("same", null!));
+    }
+
+    [TestMethod]
     public void FirewallRulesAreFilteredToTheOnesMentioningMwbLite()
     {
         string netsh = "\r\nRule Name:                            Core Networking - DNS\r\n----------------------------------------------------------------------\r\nEnabled:                              Yes\r\nDirection:                            Out\r\n"
@@ -252,10 +298,10 @@ public sealed class DiagnosticsBundleTests
         Directory.CreateDirectory(Path.Combine(user, "logs"));
         File.WriteAllText(Path.Combine(user, "settings.json"), $"{{ \"securityKey\": \"{Secret}\", \"machines\": [\"DESK-PC\"] }}");
         File.WriteAllText(Path.Combine(user, "status.json"), "{ \"pcs\": [] }");
-        File.WriteAllText(Path.Combine(user, "logs", "mwblite.log"), "2026-01-01 [1] LiteTray: hello\r\n");
+        File.WriteAllText(Path.Combine(user, "logs", "mwblite.log"), "2026-01-01 [1] LiteTray: hello\r\n2026-01-01 [1] LiteTray: key " + Secret + " rejected\r\n");
         string zipPath = Path.Combine(dir, "out.zip");
 
-        var notes = await LiteDiagnosticsBundle.CreateAsync(zipPath, null, new LiteDiagnosticsBundle.Locations(user, Path.Combine(dir, "no-service"), Live: false), CancellationToken.None);
+        var notes = await LiteDiagnosticsBundle.CreateAsync(zipPath, new LiteConfig { SecurityKey = Secret }, new LiteDiagnosticsBundle.Locations(user, Path.Combine(dir, "no-service"), Live: false), CancellationToken.None);
 
         Assert.IsTrue(File.Exists(zipPath));
         Assert.IsFalse(File.Exists(zipPath + ".tmp"));
@@ -270,6 +316,9 @@ public sealed class DiagnosticsBundleTests
         Assert.IsFalse(Read("settings.json").Contains(Secret, StringComparison.Ordinal));
         Assert.IsTrue(Read("settings.json").Contains("<redacted>", StringComparison.Ordinal));
         Assert.IsTrue(Read("logs/mwblite.log").Contains("hello", StringComparison.Ordinal));
+        Assert.IsFalse(Read("logs/mwblite.log").Contains(Secret, StringComparison.Ordinal), "the key is removed from logs too");
+        Assert.IsTrue(Read("logs/mwblite.log").Contains("key [security key removed] rejected", StringComparison.Ordinal));
+        Assert.IsFalse(Read("status.json").Contains(Secret, StringComparison.Ordinal));
         Assert.IsTrue(Read("system.txt").Contains("MwbLite " + LiteUpdate.CurrentText, StringComparison.Ordinal));
 
         Assert.IsTrue(notes.Any(n => n.Contains("update.json", StringComparison.Ordinal)), "a missing file is a note");

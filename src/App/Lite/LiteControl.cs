@@ -13,7 +13,12 @@
 // (in service mode there are several SYSTEM instances, one per desktop, and MWB moves its sockets between them).
 // LiteTray.OnTimer calls Maintain() every second: it binds when this instance should listen, retries a failed bind
 // every 30 s (quietly: one log line per streak), and stops when the desktop goes away. The Settings window and the
-// helper never start it. Binding mirrors MWB's own listener (TcpListener.Create: dual-stack IPv6/IPv4 where available).
+// helper never start it. Binding mirrors MWB's own listener (TcpListener.Create: dual-stack IPv6/IPv4 where available),
+// but exclusively, so no other program on this PC can bind the same port on a more specific address and take over.
+//
+// A connection costs the listener little before it has proven the security key: at most 16 at once, at most 2 from one
+// address, 3 s for the TLS handshake and key proof (the request and reply then get 10 s), and an address that fails the
+// proof is refused for 30 s (LiteConnectionLimiter). Failures of single connections are routine and logged sparingly.
 using System;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
@@ -55,12 +60,17 @@ namespace MouseWithoutBorders.Lite
         private static readonly TimeSpan DnsTimeout = TimeSpan.FromSeconds(3);
         private static readonly TimeSpan BindRetry = TimeSpan.FromSeconds(30);
         private static readonly TimeSpan LogEvery = TimeSpan.FromMinutes(10);
+        private static readonly TimeSpan AcceptRestart = TimeSpan.FromSeconds(5);
         private const int MaxConcurrent = 16;
+        private const int MaxAcceptFailures = 20;
+        internal const int MaxLogged = 256;
 
         private static readonly Lock Gate = new();
+        private static readonly object LogGate = new();
         private static readonly ConcurrentDictionary<string, Func<JsonObject, JsonObject>> Handlers = new(StringComparer.Ordinal);
-        private static readonly ConcurrentDictionary<string, DateTime> LastLogged = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, DateTime> LastLogged = new(StringComparer.OrdinalIgnoreCase);
         private static readonly SemaphoreSlim Slots = new(MaxConcurrent, MaxConcurrent);
+        private static readonly LiteConnectionLimiter Limiter = new();
 
         private static TcpListener listener;
         private static CancellationTokenSource stopListening;
@@ -74,6 +84,18 @@ namespace MouseWithoutBorders.Lite
         }
 
         internal static int PortFor(int tcpPort) => tcpPort + PortOffset;
+
+        /// <summary>How long a new connection has for the TLS handshake and key proof before it is closed (tests shorten it).</summary>
+        internal static TimeSpan PreAuthTimeout { get; set; } = TimeSpan.FromSeconds(3);
+
+        /// <summary>True while connections from the address are refused (it recently failed the key proof). For tests.</summary>
+        internal static bool IsRefused(IPAddress address) => Limiter.IsRefused(address);
+
+        /// <summary>How many connections from the address are being served right now. For tests.</summary>
+        internal static int OpenConnections(IPAddress address) => Limiter.OpenCount(address);
+
+        /// <summary>Forgets the per-address counts and refusals. For tests.</summary>
+        internal static void ResetLimits() => Limiter.Clear();
 
         /// <summary>The port to listen on and to dial (tests point it at a loopback listener).</summary>
         internal static Func<int> PortProvider { get; set; } = () => PortFor(Common.tcpPort > 0 ? Common.tcpPort : Setting.Values.TcpPort);
@@ -115,19 +137,28 @@ namespace MouseWithoutBorders.Lite
                 }
 
                 int port = 0;
+                TcpListener l = null;
                 try
                 {
                     port = PortProvider();
-                    var l = TcpListener.Create(port); // dual-stack IPv6/IPv4 where available, like MWB's own listener
+                    l = TcpListener.Create(port); // dual-stack IPv6/IPv4 where available, like MWB's own listener
+                    l.ExclusiveAddressUse = true; // another program on this PC can't bind the same port on a specific address
                     l.Start();
+                    var cts = new CancellationTokenSource();
+                    CancellationToken token = cts.Token; // read now: the loop must not look at the static field, which Stop() clears
                     listener = l;
-                    stopListening = new CancellationTokenSource();
-                    _ = Task.Run(() => AcceptLoop(l, stopListening.Token));
+                    stopListening = cts;
+                    _ = Task.Run(() => AcceptLoop(l, token));
                     bindFailureLogged = false;
                     LiteLog.Write(nameof(LiteControl), "Control channel listening on port " + ListeningPort + ".");
                 }
                 catch (Exception e) when (e is SocketException or InvalidOperationException or ArgumentOutOfRangeException or ObjectDisposedException)
                 {
+                    if (listener == null)
+                    {
+                        l?.Stop(); // the socket TcpListener.Create made
+                    }
+
                     nextBind = DateTime.UtcNow + BindRetry;
                     if (!bindFailureLogged)
                     {
@@ -143,81 +174,151 @@ namespace MouseWithoutBorders.Lite
         {
             lock (Gate)
             {
-                if (listener == null)
-                {
-                    return;
-                }
-
-                try
-                {
-                    stopListening?.Cancel();
-                    listener.Stop();
-                }
-                catch (Exception e) when (e is SocketException or ObjectDisposedException)
-                {
-                }
-
-                listener = null;
-                stopListening = null;
-                LiteLog.Write(nameof(LiteControl), "Control channel stopped.");
+                StopLocked("Control channel stopped.");
             }
         }
 
+        // Caller holds Gate.
+        private static void StopLocked(string message)
+        {
+            if (listener == null)
+            {
+                return;
+            }
+
+            try
+            {
+                stopListening?.Cancel();
+                listener.Stop();
+            }
+            catch (Exception e) when (e is SocketException or ObjectDisposedException)
+            {
+            }
+
+            listener = null;
+            stopListening = null;
+            LiteLog.Write(nameof(LiteControl), message);
+        }
+
+        // The accept loop died of something unexpected: mark the listener stopped so Maintain() binds a new one shortly.
+        private static void ListenerFailed(TcpListener failed)
+        {
+            lock (Gate)
+            {
+                if (listener != failed)
+                {
+                    return; // already stopped, or replaced
+                }
+
+                StopLocked("Control channel stopped after an error; it will listen again shortly.");
+                nextBind = DateTime.UtcNow + AcceptRestart;
+            }
+        }
+
+        // Nothing leaves this method as an exception: it runs as a task nobody awaits.
         private static async Task AcceptLoop(TcpListener l, CancellationToken stop)
         {
-            while (!stop.IsCancellationRequested)
+            try
             {
-                Socket socket;
-                try
+                int failures = 0;
+                while (!stop.IsCancellationRequested)
                 {
-                    socket = await l.AcceptSocketAsync(stop).ConfigureAwait(false);
-                }
-                catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException)
-                {
-                    return;
-                }
-                catch (SocketException)
-                {
-                    if (stop.IsCancellationRequested)
+                    Socket socket;
+                    try
+                    {
+                        socket = await l.AcceptSocketAsync(stop).ConfigureAwait(false);
+                    }
+                    catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException)
                     {
                         return;
                     }
-
-                    await Task.Delay(500).ConfigureAwait(false); // e.g. a connection reset before accept: just go on
-                    continue;
-                }
-
-                if (!Slots.Wait(0))
-                {
-                    socket.Dispose(); // too many at once: drop
-                    continue;
-                }
-
-                _ = Task.Run(() =>
-                {
-                    try
+                    catch (SocketException e)
                     {
-                        Serve(socket);
+                        if (stop.IsCancellationRequested)
+                        {
+                            return;
+                        }
+
+                        if (++failures > MaxAcceptFailures)
+                        {
+                            throw; // the listener is broken, not just one connection: handled below
+                        }
+
+                        LogQuietly("accept-" + e.SocketErrorCode, "Control channel: accepting a connection failed: " + e.Message);
+                        await Task.Delay(500, stop).ConfigureAwait(false); // e.g. a connection reset before accept: just go on
+                        continue;
                     }
-                    finally
-                    {
-                        _ = Slots.Release();
-                    }
-                });
+
+                    failures = 0;
+                    Admit(socket);
+                }
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested)
+            {
+            }
+            catch (Exception e)
+            {
+                LogQuietly("accept-loop-" + e.GetType().Name, "Control channel: the accept loop failed: " + e);
+                ListenerFailed(l);
             }
         }
 
-        // One connection: secure it, read one request, answer, close. Everything is bounded by Overall.
-        private static void Serve(Socket socket)
+        // Applies the limits to a new connection and, if it passes, serves it on a worker thread.
+        private static void Admit(Socket socket)
+        {
+            IPAddress address = null;
+            try
+            {
+                address = LiteConnectionLimiter.Normalize((socket.RemoteEndPoint as IPEndPoint)?.Address);
+            }
+            catch (Exception e) when (e is SocketException or ObjectDisposedException)
+            {
+                // already gone
+            }
+
+            if (address == null || !Slots.Wait(0))
+            {
+                socket.Dispose(); // too many at once, or unusable: drop
+                return;
+            }
+
+            if (!Limiter.TryEnter(address))
+            {
+                _ = Slots.Release();
+                socket.Dispose(); // this address has its share open already, or just failed the key proof
+                return;
+            }
+
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    Serve(socket, address);
+                }
+                catch (Exception e)
+                {
+                    // Serve handles its own failures; this is for anything it didn't expect. No stack trace unless it is new.
+                    LogQuietly("serve-fatal-" + e.GetType().Name, "Control connection failed unexpectedly: " + e);
+                }
+                finally
+                {
+                    Limiter.Exit(address);
+                    _ = Slots.Release();
+                }
+            });
+        }
+
+        // One connection: secure it (PreAuthTimeout for the handshake and key proof), read one request, answer, close.
+        // The rest is bounded by Overall.
+        private static void Serve(Socket socket, IPAddress address)
         {
             using (socket)
             {
-                using var deadline = new CancellationTokenSource(Overall);
+                using var deadline = new CancellationTokenSource(PreAuthTimeout);
                 using CancellationTokenRegistration reg = deadline.Token.Register(() => CloseQuietly(socket));
-                string remote = null;
+                string remote = LiteStatus.Display(address);
                 try
                 {
-                    remote = LiteStatus.Display((socket.RemoteEndPoint as IPEndPoint)?.Address);
                     string key = LiteSecureChannel.SecurityKey();
                     if (string.IsNullOrEmpty(key))
                     {
@@ -226,18 +327,25 @@ namespace MouseWithoutBorders.Lite
 
                     socket.NoDelay = true;
                     using Stream stream = LiteSecureChannel.EstablishStrict(socket, isClient: false, key);
+                    deadline.CancelAfter(Overall); // proven: the request and reply get the whole time from here
                     socket.ReceiveTimeout = socket.SendTimeout = (int)Overall.TotalMilliseconds;
                     JsonObject request = ReadMessage(stream);
                     WriteMessage(stream, Dispatch(request));
                 }
-                catch (Exception e) when (e is IOException or InvalidDataException or SocketException or ObjectDisposedException or System.Security.Authentication.AuthenticationException or KeyMismatchException)
+                catch (KeyMismatchException e)
                 {
-                    // A wrong key, a port scan, a timeout: nothing to tell the other side. Logged rarely.
-                    LogQuietly("serve-" + remote, $"Control connection from {remote} ended: {e.Message}");
+                    Limiter.RecordKeyFailure(address);
+                    LogQuietly("serve-key", $"Control connection from {remote} ended: {e.Message} It is refused for {LiteConnectionLimiter.DefaultRefuseFor.TotalSeconds:0} s.");
+                }
+                catch (Exception e) when (e is IOException or InvalidDataException or SocketException or ObjectDisposedException or System.Security.Authentication.AuthenticationException)
+                {
+                    // A port scan, a timeout, a client that hung up: nothing to tell the other side. Logged rarely, by kind.
+                    LogQuietly("serve-" + e.GetType().Name, $"Control connection from {remote} ended: {e.Message}");
                 }
                 catch (Exception e)
                 {
-                    LiteLog.Write(nameof(LiteControl), $"Control connection from {remote} failed: {e}");
+                    // Unexpected: the details (once per kind per LogEvery) are what is needed to find the cause.
+                    LogQuietly("serve-unexpected-" + e.GetType().Name, $"Control connection from {remote} failed: {e}");
                 }
             }
         }
@@ -652,17 +760,44 @@ namespace MouseWithoutBorders.Lite
             }
         }
 
-        // Failures are routine (a PC that is off, an older version): one log line per kind of failure per 10 minutes.
+        // Failures are routine (a PC that is off, an older version, a port scan): one log line per kind of failure per
+        // 10 minutes. The list of kinds is bounded, so a flood of different ones can't grow it.
         private static void LogQuietly(string what, string message)
         {
             DateTime now = DateTime.UtcNow;
-            if (LastLogged.TryGetValue(what, out DateTime last) && now - last < LogEvery)
+            lock (LogGate)
             {
-                return;
+                if (LastLogged.TryGetValue(what, out DateTime last) && now - last < LogEvery)
+                {
+                    return;
+                }
+
+                if (LastLogged.Count >= MaxLogged)
+                {
+                    PruneLogged(LastLogged, now, LogEvery, MaxLogged);
+                }
+
+                LastLogged[what] = now;
             }
 
-            LastLogged[what] = now;
             LiteLog.Write(nameof(LiteControl), message);
+        }
+
+        /// <summary>Drops the entries older than <paramref name="every"/>; if the map is still full, the oldest quarter.</summary>
+        internal static void PruneLogged(Dictionary<string, DateTime> map, DateTime now, TimeSpan every, int max)
+        {
+            foreach (string old in map.Where(kv => now - kv.Value >= every).Select(kv => kv.Key).ToList())
+            {
+                _ = map.Remove(old);
+            }
+
+            if (map.Count >= max)
+            {
+                foreach (string oldest in map.OrderBy(kv => kv.Value).Take(Math.Max(1, max / 4)).Select(kv => kv.Key).ToList())
+                {
+                    _ = map.Remove(oldest);
+                }
+            }
         }
     }
 }

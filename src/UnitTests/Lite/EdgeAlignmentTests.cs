@@ -319,6 +319,32 @@ public sealed class EdgeAlignmentTests
     }
 
     [TestMethod]
+    public void ReceivedEntriesWithInvalidPcNamesAreDropped()
+    {
+        Assert.IsTrue(LiteEdgeAlignment.IsValidPcName("DESK-PC_1.corp"));
+        Assert.IsTrue(LiteEdgeAlignment.IsValidPcName(new string('a', 64)));
+        foreach (string bad in new[] { "", " ", null!, new string('a', 65), "A B", "A:B", "A,B", "A;B", "A\\B", "A\"B\"", "A\r\nB", "<script>", "A/B" })
+        {
+            Assert.IsFalse(LiteEdgeAlignment.IsValidPcName(bad), bad ?? "(null)");
+        }
+
+        var request = LiteEdgeAlignment.ToJson(new[]
+        {
+            Entry("DESK", "LAPTOP", 0.2, 0.9),
+            Entry("DESK", "LAP:TOP", 0.2, 0.9),
+            Entry("BAD NAME", "LAPTOP", 0.2, 0.9),
+            Entry(new string('x', 65), "LAPTOP", 0.2, 0.9),
+            Entry("LAPTOP", "SERVER-2", -0.5, 1.5),
+        });
+
+        var kept = LiteEdgeAlignment.FromJson(request);
+
+        Assert.AreEqual(2, kept.Count);
+        Assert.AreEqual("DESK", kept[0].From);
+        Assert.AreEqual("SERVER-2", kept[1].To);
+    }
+
+    [TestMethod]
     public void TheCommandLineFormRoundTrips()
     {
         var entries = new[] { Entry("DESK-PC", "LAPTOP", 0.125, 0.875), Entry("A", "B", -0.5, 1.5) };

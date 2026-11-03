@@ -15,8 +15,11 @@
 //    installed folder (LiteUserLaunch). Service mode needs nothing more: the service is stopped by the installer and is
 //    not started by it, so the user's MwbLite is what starts it again, as at every sign-in.
 //
-// Only one update runs at a time (a named mutex). Nothing here takes input from whoever started the task. This runs
-// in session 0 where there is no desktop, so every failure is logged and returned as an exit code, never shown.
+// Only one update runs at a time (an exclusive lock on a file in the protected update folder; a named mutex would be
+// open to any user, who could hold it to stop updates). The folders used here are checked before use: a junction or
+// link, or a folder an ordinary user owns, is removed and created again (LitePaths.EnsureTrustedDirectory). Nothing
+// here takes input from whoever started the task. This runs in session 0 where there is no desktop, so every failure
+// is logged and returned as an exit code, never shown.
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -29,7 +32,7 @@ namespace MouseWithoutBorders.Lite
     {
         internal const string RunnerExeName = "MwbLite.Updater.exe";
 
-        private const string MutexName = @"Global\MwbLite-Update";
+        private const string LockFileName = "update.lock";
         private const string MainExeName = LitePaths.AppName + ".exe";
 
         // The task is stopped after 30 minutes; the download and the install together must fit.
@@ -57,9 +60,12 @@ namespace MouseWithoutBorders.Lite
                     return ExitNotElevated;
                 }
 
-                LitePaths.EnsureProtectedDirectory(LitePaths.ServiceDir);
-                LiteLog.Initialize(Path.Combine(LitePaths.ServiceDir, "logs"), "update");
-                LitePaths.EnsureProtectedDirectory(UpdateDir);
+                // A user can create %ProgramData%\MwbLite (and anything in it) before Setup does, so none of these is trusted as found.
+                LitePaths.EnsureTrustedDirectory(LitePaths.ServiceDir, requireTrustedOwner: false);
+                string logs = Path.Combine(LitePaths.ServiceDir, "logs");
+                LitePaths.EnsureTrustedDirectory(logs, requireTrustedOwner: true);
+                LiteLog.Initialize(logs, "update");
+                LitePaths.EnsureTrustedDirectory(UpdateDir, requireTrustedOwner: true);
 
                 return string.Equals(Path.GetFileName(LitePaths.ExePath), RunnerExeName, StringComparison.OrdinalIgnoreCase)
                     ? InstallLatest(ParentPid(args))
@@ -117,11 +123,7 @@ namespace MouseWithoutBorders.Lite
         /// </summary>
         internal static string StageRunner(string sourceDir, string runnerDir)
         {
-            if (Directory.Exists(runnerDir))
-            {
-                Directory.Delete(runnerDir, recursive: true);
-            }
-
+            LitePaths.DeleteDirectoryOrLink(runnerDir); // a link planted here is removed, never followed
             _ = Directory.CreateDirectory(runnerDir); // inherits the protected ACL of the update folder
             foreach (string file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
             {
@@ -142,10 +144,26 @@ namespace MouseWithoutBorders.Lite
 
         // ---- 2-4. download, verify, install, restart -------------------------------------------------------------
 
+        /// <summary>
+        /// Takes the exclusive lock that keeps a second update from running: a file in <paramref name="dir"/> that nobody
+        /// else may open while it is held (and that goes away when the holder closes it). Null if another update holds it.
+        /// </summary>
+        internal static FileStream TryLock(string dir)
+        {
+            try
+            {
+                return new FileStream(Path.Combine(dir, LockFileName), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+            }
+            catch (IOException e) when ((e.HResult & 0xFFFF) is 32 or 33) // ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION
+            {
+                return null;
+            }
+        }
+
         private static int InstallLatest(int taskProcessId)
         {
-            using var mutex = new Mutex(false, MutexName);
-            if (!mutex.WaitOne(0))
+            using FileStream updateLock = TryLock(UpdateDir);
+            if (updateLock == null)
             {
                 LiteLog.Write(nameof(LiteUpdater), "Another update is already running.");
                 return ExitBusy;
@@ -193,7 +211,6 @@ namespace MouseWithoutBorders.Lite
             }
             finally
             {
-                mutex.ReleaseMutex();
                 LiteCommands.DeleteDirectory(RunnerDir); // this process runs from there: removed just after it exits
             }
         }

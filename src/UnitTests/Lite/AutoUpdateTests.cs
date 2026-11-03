@@ -4,6 +4,7 @@
 using System;
 using System.IO;
 using System.Security.AccessControl;
+using System.Security.Principal;
 
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using MouseWithoutBorders.Lite;
@@ -105,6 +106,62 @@ public sealed class AutoUpdateTests
         }
 
         Assert.IsTrue(limit.TryAcquire("pc0", t.AddMinutes(30)));
+    }
+
+    [TestMethod]
+    public void IncomingAnnouncementsAreAcceptedOncePerHourWhateverTheVersion()
+    {
+        var received = new LiteAutoUpdate.OncePerWindow(TimeSpan.FromHours(1));
+        var tried = new LiteAutoUpdate.OncePerWindow(TimeSpan.FromHours(24));
+        DateTime t = new(2026, 11, 4, 9, 0, 0, DateTimeKind.Utc);
+        bool Accept(Version announced, DateTime at, bool enabled = true) => LiteAutoUpdate.ShouldAcceptAnnouncement(enabled, announced, V090, received, tried, at);
+
+        // Announcements that would be ignored anyway don't use up the hour's slot.
+        Assert.IsFalse(Accept(V091, t, enabled: false), "switch off");
+        Assert.IsFalse(Accept(V080, t), "older");
+        Assert.IsFalse(Accept(V090, t), "same version");
+        Assert.IsFalse(Accept(null!, t), "unreadable");
+
+        Assert.IsTrue(Accept(V091, t));
+        Assert.IsFalse(Accept(V091, t.AddMinutes(1)), "the same version again");
+        Assert.IsFalse(Accept(new Version(0, 9, 2), t.AddMinutes(2)), "another version doesn't get its own slot");
+        Assert.IsFalse(Accept(new Version(0, 9, 3), t.AddMinutes(59)));
+        Assert.IsTrue(Accept(new Version(0, 9, 2), t.AddMinutes(61)), "an hour later");
+    }
+
+    [TestMethod]
+    public void AVersionWhoseUpdateWasTriedIsNotAcceptedAgainForADay()
+    {
+        var received = new LiteAutoUpdate.OncePerWindow(TimeSpan.FromHours(1));
+        var tried = new LiteAutoUpdate.OncePerWindow(TimeSpan.FromHours(24));
+        DateTime t = new(2026, 11, 4, 9, 0, 0, DateTimeKind.Utc);
+
+        tried.Record("0.9.1", t);
+
+        Assert.IsFalse(LiteAutoUpdate.ShouldAcceptAnnouncement(true, V091, V090, received, tried, t.AddHours(2)), "failed 2 hours ago");
+        Assert.IsTrue(LiteAutoUpdate.ShouldAcceptAnnouncement(true, new Version(0, 9, 2), V090, received, tried, t.AddHours(2)), "another version is separate, and the refused one used no slot");
+        Assert.IsFalse(LiteAutoUpdate.ShouldAcceptAnnouncement(true, V091, V090, received, tried, t.AddHours(23)));
+        Assert.IsTrue(LiteAutoUpdate.ShouldAcceptAnnouncement(true, V091, V090, received, tried, t.AddHours(25)), "a day later it may be tried again");
+    }
+
+    [TestMethod]
+    public void OurAnnouncementUsesTheHourOnlyWhenThePcAnswered()
+    {
+        var answered = new LiteAutoUpdate.OncePerWindow(TimeSpan.FromHours(1));
+        var attempts = new LiteAutoUpdate.OncePerWindow(TimeSpan.FromMinutes(5));
+        DateTime t = new(2026, 11, 4, 9, 0, 0, DateTimeKind.Utc);
+        const string key = "LAPTOP|0.9.1";
+
+        Assert.IsTrue(LiteAutoUpdate.ShouldSendAnnouncement(answered, attempts, key, t));
+        // No answer: nothing is recorded as answered. It isn't hammered, but it is tried again within minutes.
+        Assert.IsFalse(LiteAutoUpdate.ShouldSendAnnouncement(answered, attempts, key, t.AddMinutes(1)));
+        Assert.IsTrue(LiteAutoUpdate.ShouldSendAnnouncement(answered, attempts, key, t.AddMinutes(6)));
+
+        answered.Record(key, t.AddMinutes(6)); // this time it replied
+        Assert.IsFalse(LiteAutoUpdate.ShouldSendAnnouncement(answered, attempts, key, t.AddMinutes(7)));
+        Assert.IsFalse(LiteAutoUpdate.ShouldSendAnnouncement(answered, attempts, key, t.AddMinutes(30)), "answered: not again within the hour");
+        Assert.IsTrue(LiteAutoUpdate.ShouldSendAnnouncement(answered, attempts, key, t.AddMinutes(68)));
+        Assert.IsTrue(LiteAutoUpdate.ShouldSendAnnouncement(answered, attempts, "OFFICE|0.9.1", t.AddMinutes(7)), "other PCs are separate");
     }
 
     [TestMethod]
@@ -224,6 +281,145 @@ public sealed class AutoUpdateTests
         }
     }
 
+    [TestMethod]
+    public void OnlyOneUpdateHoldsTheLockFile()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "MwbLiteTests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            using (FileStream first = LiteUpdater.TryLock(root)!)
+            {
+                Assert.IsNotNull(first);
+                Assert.IsNull(LiteUpdater.TryLock(root), "a second update must not start while the first holds the lock");
+            }
+
+            using FileStream again = LiteUpdater.TryLock(root)!;
+            Assert.IsNotNull(again, "free again once the first update is over");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+
+        Assert.IsFalse(Directory.Exists(root));
+    }
+
+    // ---- links and foreign folders in %ProgramData%\MwbLite ---------------------------------------------------
+
+    // Makes a directory junction (no administrator rights needed). Skips the test where that isn't possible.
+    private static void MakeJunction(string link, string target)
+    {
+        var info = new System.Diagnostics.ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/c mklink /J \"{link}\" \"{target}\"")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+        };
+        using System.Diagnostics.Process p = System.Diagnostics.Process.Start(info)!;
+        _ = p.StandardOutput.ReadToEnd();
+        p.WaitForExit();
+        if (p.ExitCode != 0 || !Directory.Exists(link))
+        {
+            Assert.Inconclusive("Cannot create a junction here.");
+        }
+    }
+
+    [TestMethod]
+    public void ALinkWhereAFolderBelongsIsRemovedWithoutTouchingWhatItPointsTo()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "MwbLiteTests-" + Guid.NewGuid().ToString("N"));
+        string target = Path.Combine(root, "elsewhere");
+        string link = Path.Combine(root, "update");
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(target, "precious.txt"), "do not delete");
+        try
+        {
+            MakeJunction(link, target);
+
+            Assert.IsTrue(LitePaths.RemoveUntrustedDirectory(link, requireTrustedOwner: false));
+
+            Assert.IsFalse(Directory.Exists(link));
+            Assert.IsTrue(File.Exists(Path.Combine(target, "precious.txt")), "the target and its files stay");
+
+            // Same through the runner folder's own path: a link is removed, not followed, when the staged copy is made.
+            string installed = Path.Combine(root, "installed");
+            Directory.CreateDirectory(installed);
+            File.WriteAllText(Path.Combine(installed, "MwbLite.exe"), "exe");
+            string runner = Path.Combine(root, "runner");
+            MakeJunction(runner, target);
+
+            string exe = LiteUpdater.StageRunner(installed, runner);
+
+            Assert.IsTrue(File.Exists(exe));
+            Assert.AreEqual(runner, Path.GetDirectoryName(exe));
+            Assert.IsFalse(new DirectoryInfo(runner).Attributes.HasFlag(FileAttributes.ReparsePoint), "now a real folder");
+            Assert.IsTrue(File.Exists(Path.Combine(target, "precious.txt")));
+            Assert.IsFalse(File.Exists(Path.Combine(target, LiteUpdater.RunnerExeName)), "nothing was written through the link");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void AFileWhereAFolderBelongsIsRemovedAndMissingOrOrdinaryFoldersAreLeftAlone()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "MwbLiteTests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            Assert.IsFalse(LitePaths.RemoveUntrustedDirectory(Path.Combine(root, "missing"), requireTrustedOwner: true));
+
+            string file = Path.Combine(root, "update");
+            File.WriteAllText(file, "not a folder");
+            Assert.IsTrue(LitePaths.RemoveUntrustedDirectory(file, requireTrustedOwner: false));
+            Assert.IsFalse(File.Exists(file));
+
+            string folder = Path.Combine(root, "plain");
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(Path.Combine(folder, "keep.txt"), "x");
+            Assert.IsFalse(LitePaths.RemoveUntrustedDirectory(folder, requireTrustedOwner: false), "an ordinary folder is fine when the owner doesn't matter");
+            Assert.IsTrue(File.Exists(Path.Combine(folder, "keep.txt")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void OnlySystemAndAdministratorsMayOwnTheFolders()
+    {
+        Assert.IsTrue(LitePaths.IsTrustedOwner(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null)));
+        Assert.IsTrue(LitePaths.IsTrustedOwner(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null)));
+        Assert.IsFalse(LitePaths.IsTrustedOwner(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null)));
+        Assert.IsFalse(LitePaths.IsTrustedOwner(new SecurityIdentifier(WellKnownSidType.WorldSid, null)));
+        Assert.IsFalse(LitePaths.IsTrustedOwner(WindowsIdentity.GetCurrent().User) && !WindowsIdentity.GetCurrent().IsSystem, "an ordinary account's own SID");
+        Assert.IsFalse(LitePaths.IsTrustedOwner(null!));
+
+        // A folder owned by whoever runs this test: removed if that isn't SYSTEM or Administrators, kept if it is.
+        string folder = Path.Combine(Path.GetTempPath(), "MwbLiteTests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var owner = (SecurityIdentifier)new DirectoryInfo(folder).GetAccessControl().GetOwner(typeof(SecurityIdentifier))!;
+
+            bool removed = LitePaths.RemoveUntrustedDirectory(folder, requireTrustedOwner: true);
+
+            Assert.AreEqual(!LitePaths.IsTrustedOwner(owner), removed);
+            Assert.AreEqual(removed, !Directory.Exists(folder));
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
     // ---- the scheduled task ----------------------------------------------------------------------------------
 
     [TestMethod]
@@ -242,7 +438,8 @@ public sealed class AutoUpdateTests
 
         Assert.AreEqual(fileAllAccess, rights["S-1-5-18"], "SYSTEM: full control");
         Assert.AreEqual(fileAllAccess, rights["S-1-5-32-544"], "Administrators: full control");
-        Assert.AreEqual(genericRead | genericExecute, rights["S-1-5-11"], "Authenticated Users: read and execute only");
+        Assert.AreEqual(genericRead | genericExecute, rights["S-1-5-4"], "Interactive users: read and execute only");
+        Assert.IsFalse(rights.ContainsKey("S-1-5-11"), "not every authenticated (e.g. network) logon");
     }
 
     [TestMethod]

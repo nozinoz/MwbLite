@@ -3,6 +3,37 @@
 Each version's section is also its GitHub Release notes (see `tools/publish-release.ps1`), and Settings > About
 shows them for the latest release. Upgrade every PC to the same version.
 
+## 0.9.0
+
+**Upgrade every PC to 0.9.0.** The new features below use a new connection between MwbLite PCs (TCP port
+`tcpPort+3`, default 15103), so both PCs need 0.9.0 for them. Mouse, keyboard, clipboard and files are unchanged.
+
+- **Wake a sleeping PC from the tray.** A PC that isn't connected gets a **Wake LAPTOP** item (with its own name)
+  in the tray menu. It needs a wired network and "Wake on Magic Packet" turned on in that PC's BIOS and network
+  adapter settings; Wi-Fi laptops usually can't be woken. The PC must have been connected to this one once, so its
+  network card address is known.
+- **Lock all PCs** and **Sleep all PCs…** (asks first) in the tray menu. Both include this PC.
+- **Line up screens of different sizes** (Settings > PCs). Drag a screen along its neighbour's edge so the cursor
+  comes out where you expect, or press **Use real sizes** to scale both screens by their physical size. Apply
+  sends it to the connected PCs.
+- **Connection notices** (on by default; Settings > Connection): a notification when a PC that was connected has
+  been gone for 20 seconds, and when it is back.
+- **Save diagnostics…** (Settings > About) puts the logs, status, network details and your settings, without the
+  security key, into one zip to attach to a problem report.
+- **Updates without a UAC prompt.** Setup now adds an on-demand **MwbLite Update** scheduled task, and **Update
+  now** uses it: it installs the new version and restarts MwbLite, with no administrator prompt. Copies that weren't
+  installed with Setup still ask for UAC.
+- **Install updates automatically** (off by default; Settings > About): the weekly check installs a new version by
+  itself.
+- **Update together with my other PCs** (on by default): when a connected PC runs an older MwbLite, this one tells
+  it, and it updates itself. The other PC never downloads anything from the sender; it installs the latest GitHub
+  release only.
+- **Smaller portable exes**: about 74 MB each instead of 178 MB, at the cost of more memory and a slightly slower
+  start. The installed version is unchanged.
+- The new update features take effect from the release after 0.9.0. Installing 0.9.0 itself still uses the old
+  update flow (one UAC prompt, no task yet).
+- `tcpPort` can be at most 65532 now (it was 65534), because the new connection uses `tcpPort+3`.
+
 ## 0.8.4
 
 - Settings buttons now work like a classic Windows dialog: **Apply and close** (like OK) saves your changes and

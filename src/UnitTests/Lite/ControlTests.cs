@@ -2,6 +2,7 @@
 // loopback TLS connection with a throwaway certificate and the security-key proof.
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
@@ -72,7 +73,37 @@ public sealed class ControlTests
     public void TestCleanup()
     {
         ClientKey.Value = null;
+        LiteControl.PreAuthTimeout = TimeSpan.FromSeconds(3);
         LiteControl.Stop();
+        LiteControl.ResetLimits(); // the tests all connect from 127.0.0.1; a refusal must not leak into the next one
+    }
+
+    private static void WaitFor(Func<bool> condition, string what)
+    {
+        DateTime end = DateTime.UtcNow + Wait;
+        while (!condition())
+        {
+            Assert.IsTrue(DateTime.UtcNow < end, "timed out waiting for " + what);
+            Thread.Sleep(20);
+        }
+    }
+
+    // Reads until the server closes the connection; returns how long that took (the test fails if it never does).
+    private static TimeSpan TimeUntilClosed(TcpClient client)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        NetworkStream stream = client.GetStream();
+        stream.ReadTimeout = 10000;
+        try
+        {
+            _ = stream.Read(new byte[16]);
+        }
+        catch (IOException e) when (e.InnerException is not SocketException { SocketErrorCode: SocketError.TimedOut })
+        {
+            // a reset counts as closed too
+        }
+
+        return watch.Elapsed;
     }
 
     // Listens on a free loopback-reachable port and points the client side at it.
@@ -238,6 +269,130 @@ public sealed class ControlTests
     }
 
     [TestMethod]
+    public void AnAddressThatFailedTheKeyProofIsRefusedUntilItsTimeIsUp()
+    {
+        StartListening();
+        ClientKey.Value = OtherKey;
+        Assert.IsNull(Run(LiteControl.SendAsync("127.0.0.1", "hello", null, CancellationToken.None)));
+        WaitFor(() => LiteControl.IsRefused(IPAddress.Loopback), "the server to note the failed proof");
+
+        ClientKey.Value = null; // the right key now, but the address is on the list
+        Assert.IsNull(Run(LiteControl.SendAsync("127.0.0.1", "hello", null, CancellationToken.None)), "refused");
+
+        LiteControl.ResetLimits(); // stands in for the 30 s going by (LiteConnectionLimiterTests covers the clock)
+        Assert.IsNotNull(Run(LiteControl.SendAsync("127.0.0.1", "hello", null, CancellationToken.None)));
+    }
+
+    [TestMethod]
+    public void AConnectionThatDoesNotSecureItselfInTimeIsClosed()
+    {
+        LiteControl.PreAuthTimeout = TimeSpan.FromMilliseconds(500);
+        int port = StartListening();
+
+        using (var idle = new TcpClient())
+        {
+            idle.Connect(IPAddress.Loopback, port); // connects and then says nothing
+            TimeSpan took = TimeUntilClosed(idle);
+            Assert.IsTrue(took < TimeSpan.FromSeconds(6), $"closed after {took}; the handshake alone is allowed 10 s");
+        }
+
+        LiteControl.PreAuthTimeout = TimeSpan.FromSeconds(3);
+        Assert.IsNotNull(Run(LiteControl.SendAsync("127.0.0.1", "hello", null, CancellationToken.None)), "a proper client is unaffected");
+    }
+
+    [TestMethod]
+    public void OneAddressMayHaveTwoConnectionsOpenAtOnce()
+    {
+        LiteControl.PreAuthTimeout = TimeSpan.FromSeconds(30); // the idle connections stay open for the whole test
+        int port = StartListening();
+
+        using var first = new TcpClient();
+        using var second = new TcpClient();
+        first.Connect(IPAddress.Loopback, port);
+        second.Connect(IPAddress.Loopback, port);
+        WaitFor(() => LiteControl.OpenConnections(IPAddress.Loopback) == 2, "both connections to be admitted");
+
+        using (var third = new TcpClient())
+        {
+            third.Connect(IPAddress.Loopback, port);
+            Assert.IsTrue(TimeUntilClosed(third) < TimeSpan.FromSeconds(5), "the third is dropped at once");
+        }
+
+        Assert.IsFalse(first.Client.Poll(200_000, SelectMode.SelectRead), "the first is still open");
+        Assert.IsFalse(second.Client.Poll(0, SelectMode.SelectRead), "so is the second");
+
+        first.Close();
+        WaitFor(() => LiteControl.OpenConnections(IPAddress.Loopback) == 1, "the closed connection to be let go");
+        LiteControl.PreAuthTimeout = TimeSpan.FromSeconds(3);
+        Assert.IsNotNull(Run(LiteControl.SendAsync("127.0.0.1", "hello", null, CancellationToken.None)), "a place is free again");
+
+        second.Close();
+        WaitFor(() => LiteControl.OpenConnections(IPAddress.Loopback) == 0, "all connections to end");
+    }
+
+    [TestMethod]
+    public void ListenerBindsExclusively()
+    {
+        int port = StartListening();
+
+        // Without ExclusiveAddressUse, Windows lets a program bind the same port on a more specific address and
+        // receive that address's connections instead of the listener.
+        using var other = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        Assert.ThrowsExactly<SocketException>(() => other.Bind(new IPEndPoint(IPAddress.Loopback, port)));
+    }
+
+    [TestMethod]
+    public void StartingAndStoppingRightAwayLeavesNoFailedTasks()
+    {
+        var unobserved = new List<Exception>();
+        void OnUnobserved(object? sender, UnobservedTaskExceptionEventArgs e) => unobserved.Add(e.Exception);
+        TaskScheduler.UnobservedTaskException += OnUnobserved;
+        try
+        {
+            LiteControl.PortProvider = () => 0;
+            for (int i = 0; i < 40; i++)
+            {
+                LiteControl.Start();
+                LiteControl.Stop(); // before the accept loop's task has necessarily started
+            }
+
+            Thread.Sleep(300);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= OnUnobserved;
+        }
+
+        Assert.AreEqual(0, unobserved.Count, string.Join("; ", unobserved.Select(e => e.Message)));
+        Assert.IsFalse(LiteControl.IsListening);
+    }
+
+    [TestMethod]
+    public void TheListOfLoggedFailureKindsStaysBounded()
+    {
+        var map = new Dictionary<string, DateTime>();
+        DateTime now = new(2026, 11, 4, 9, 0, 0, DateTimeKind.Utc);
+        for (int i = 0; i < 300; i++)
+        {
+            map["kind-" + i] = now.AddSeconds(i); // all recent
+        }
+
+        LiteControl.PruneLogged(map, now.AddMinutes(1), TimeSpan.FromMinutes(10), LiteControl.MaxLogged);
+
+        Assert.IsTrue(map.Count < LiteControl.MaxLogged, "room for new kinds");
+        Assert.IsFalse(map.ContainsKey("kind-0"), "the oldest go first");
+        Assert.IsTrue(map.ContainsKey("kind-299"));
+
+        // Old entries go whatever the size.
+        map["old"] = now.AddHours(-1);
+        LiteControl.PruneLogged(map, now.AddMinutes(1), TimeSpan.FromMinutes(10), 100_000);
+        Assert.IsFalse(map.ContainsKey("old"));
+    }
+
+    [TestMethod]
     public void HelloAnswersWithThisPcsDetailsAndRaisesPeerHello()
     {
         StartListening();
@@ -347,5 +502,111 @@ public sealed class ControlTests
         }
 
         Assert.IsNotNull(failure, "a peer without TLS must be refused");
+    }
+}
+
+[TestClass]
+public sealed class LiteConnectionLimiterTests
+{
+    private static readonly IPAddress A = IPAddress.Parse("192.168.1.10");
+    private static readonly IPAddress B = IPAddress.Parse("192.168.1.11");
+
+    private DateTime now = new(2026, 11, 4, 9, 0, 0, DateTimeKind.Utc);
+
+    private LiteConnectionLimiter Create() => new(utcNow: () => now);
+
+    [TestMethod]
+    public void AnAddressMayHaveTwoConnectionsAtOnce()
+    {
+        var limiter = Create();
+
+        Assert.IsTrue(limiter.TryEnter(A));
+        Assert.IsTrue(limiter.TryEnter(A));
+        Assert.IsFalse(limiter.TryEnter(A), "a third");
+        Assert.IsTrue(limiter.TryEnter(B), "another address has its own share");
+        Assert.AreEqual(2, limiter.OpenCount(A));
+
+        limiter.Exit(A);
+        Assert.IsTrue(limiter.TryEnter(A), "a place is free again");
+        limiter.Exit(A);
+        limiter.Exit(A);
+        limiter.Exit(A); // more exits than entries is harmless
+        Assert.AreEqual(0, limiter.OpenCount(A));
+        Assert.AreEqual(1, limiter.OpenCount(B));
+    }
+
+    [TestMethod]
+    public void IPv4InsideIPv6IsTheSameAddress()
+    {
+        var limiter = Create();
+
+        Assert.IsTrue(limiter.TryEnter(A));
+        Assert.IsTrue(limiter.TryEnter(A.MapToIPv6()));
+        Assert.IsFalse(limiter.TryEnter(A));
+        Assert.IsFalse(limiter.TryEnter(null!), "an unknown address can't be limited, so it is refused");
+        Assert.AreEqual(A, LiteConnectionLimiter.Normalize(A.MapToIPv6()));
+
+        var withScope = IPAddress.Parse("fe80::1%12");
+        Assert.AreEqual(IPAddress.Parse("fe80::1"), LiteConnectionLimiter.Normalize(withScope), "the interface isn't part of who it is");
+    }
+
+    [TestMethod]
+    public void AFailedKeyProofRefusesTheAddressFor30Seconds()
+    {
+        var limiter = Create();
+
+        limiter.RecordKeyFailure(A);
+
+        Assert.IsTrue(limiter.IsRefused(A));
+        Assert.IsFalse(limiter.TryEnter(A));
+        Assert.IsTrue(limiter.TryEnter(B), "only that address");
+        now = now.AddSeconds(29);
+        Assert.IsFalse(limiter.TryEnter(A));
+        now = now.AddSeconds(2);
+        Assert.IsFalse(limiter.IsRefused(A));
+        Assert.IsTrue(limiter.TryEnter(A), "over");
+    }
+
+    [TestMethod]
+    public void ARefusalDoesNotLastForeverIfTheClockIsSetBack()
+    {
+        var limiter = Create();
+        limiter.RecordKeyFailure(A);
+
+        now = now.AddDays(-1);
+
+        Assert.IsFalse(limiter.IsRefused(A));
+    }
+
+    [TestMethod]
+    public void TheRefusedListIsBoundedAndPruned()
+    {
+        var limiter = Create();
+        for (int i = 0; i < 2000; i++)
+        {
+            limiter.RecordKeyFailure(IPAddress.Parse($"10.{i / 256}.{i % 256}.1"));
+            Assert.IsTrue(limiter.RefusedCount <= LiteConnectionLimiter.MaxRefused);
+        }
+
+        Assert.IsTrue(limiter.IsRefused(IPAddress.Parse($"10.{1999 / 256}.{1999 % 256}.1")), "the newest is kept");
+
+        now = now.AddMinutes(5);
+        limiter.RecordKeyFailure(A);
+        Assert.IsTrue(limiter.IsRefused(A));
+        Assert.IsTrue(limiter.RefusedCount < LiteConnectionLimiter.MaxRefused, "expired entries are dropped when the list is full");
+    }
+
+    [TestMethod]
+    public void ClearForgetsEverything()
+    {
+        var limiter = Create();
+        Assert.IsTrue(limiter.TryEnter(A));
+        limiter.RecordKeyFailure(B);
+
+        limiter.Clear();
+
+        Assert.AreEqual(0, limiter.OpenCount(A));
+        Assert.IsFalse(limiter.IsRefused(B));
+        Assert.AreEqual(0, limiter.RefusedCount);
     }
 }

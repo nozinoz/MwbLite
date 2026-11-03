@@ -12,7 +12,10 @@
 //   published, and only then starts the normal update (the same task, downloading the newest release from GitHub and
 //   checking it against GitHub's SHA-256). Nothing the other PC names is ever downloaded or run. Without the update
 //   task (not installed with Setup) it only shows a notification that points at Settings > About.
-// Both sides are rate limited, so a PC that can't or won't update isn't asked again for an hour.
+// Both sides are rate limited. The sender spends its hourly slot for a PC only when that PC answered (it retries after
+// a few minutes otherwise). The receiver acts on one announcement per hour, whichever PC or version it names, and
+// doesn't act again on a version whose update it already tried for a day, so a PC (or a bug) can't make it download,
+// prompt or start the update task over and over.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -43,8 +46,14 @@ namespace MouseWithoutBorders.Lite
         internal const string UpdateAvailableOp = "update-available";
 
         private static readonly TimeSpan RateWindow = TimeSpan.FromHours(1);
-        private static readonly OncePerWindow Received = new(RateWindow);
-        private static readonly OncePerWindow Sent = new(RateWindow);
+        private static readonly TimeSpan RetryWindow = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan FailedWindow = TimeSpan.FromHours(24);
+        private const string AnyAnnouncement = "update-available";
+
+        private static readonly OncePerWindow Received = new(RateWindow);       // one accepted announcement per hour, from anyone
+        private static readonly OncePerWindow TriedVersions = new(FailedWindow); // versions we started (or failed to start) an update to
+        private static readonly OncePerWindow Sent = new(RateWindow);           // PCs (and version) that have answered our announcement
+        private static readonly OncePerWindow SentAttempts = new(RetryWindow);  // and when we last tried, answered or not
 
         // ---- decisions (pure) --------------------------------------------------------------------------------
 
@@ -73,6 +82,22 @@ namespace MouseWithoutBorders.Lite
             return updateTaskAvailable ? PeerUpdateAction.UpdateNow : PeerUpdateAction.TellUser;
         }
 
+        /// <summary>
+        /// Should this PC send its announcement to <paramref name="key"/> (peer and version) now? Not if that PC already
+        /// answered within the hour (<paramref name="answered"/>), and not if we tried within the last few minutes
+        /// (<paramref name="attempts"/>); a PC that doesn't answer is tried again then, not an hour later.
+        /// </summary>
+        internal static bool ShouldSendAnnouncement(OncePerWindow answered, OncePerWindow attempts, string key, DateTime nowUtc) =>
+            !answered.IsHeld(key, nowUtc) && attempts.TryAcquire(key, nowUtc);
+
+        /// <summary>
+        /// Should an incoming announcement of <paramref name="announced"/> be acted on? Only a newer version, not one we
+        /// already tried to update to (<paramref name="tried"/>), and only one announcement per window from anybody
+        /// (<paramref name="received"/>). The window's slot is used up only by an announcement that passes the other checks.
+        /// </summary>
+        internal static bool ShouldAcceptAnnouncement(bool enabled, Version announced, Version current, OncePerWindow received, OncePerWindow tried, DateTime nowUtc) =>
+            enabled && IsNewerThan(announced, current) && !tried.IsHeld(announced.ToString(3), nowUtc) && received.TryAcquire(AnyAnnouncement, nowUtc);
+
         /// <summary>Allows each key once per window (an hour for update announcements).</summary>
         internal sealed class OncePerWindow
         {
@@ -91,21 +116,45 @@ namespace MouseWithoutBorders.Lite
             {
                 lock (gate)
                 {
-                    if (last.TryGetValue(key, out DateTime t) && nowUtc >= t && nowUtc - t < window)
+                    if (IsHeldLocked(key, nowUtc))
                     {
                         return false;
                     }
 
-                    last[key] = nowUtc;
-                    if (last.Count > PruneAbove)
-                    {
-                        foreach (string old in last.Where(kv => nowUtc - kv.Value >= window).Select(kv => kv.Key).ToList())
-                        {
-                            _ = last.Remove(old);
-                        }
-                    }
-
+                    RecordLocked(key, nowUtc);
                     return true;
+                }
+            }
+
+            /// <summary>True if <paramref name="key"/> was acquired or recorded within the window before <paramref name="nowUtc"/>.</summary>
+            internal bool IsHeld(string key, DateTime nowUtc)
+            {
+                lock (gate)
+                {
+                    return IsHeldLocked(key, nowUtc);
+                }
+            }
+
+            /// <summary>Starts the window for <paramref name="key"/> without checking it (for something that is only known afterwards).</summary>
+            internal void Record(string key, DateTime nowUtc)
+            {
+                lock (gate)
+                {
+                    RecordLocked(key, nowUtc);
+                }
+            }
+
+            private bool IsHeldLocked(string key, DateTime nowUtc) => last.TryGetValue(key, out DateTime t) && nowUtc >= t && nowUtc - t < window;
+
+            private void RecordLocked(string key, DateTime nowUtc)
+            {
+                last[key] = nowUtc;
+                if (last.Count > PruneAbove)
+                {
+                    foreach (string old in last.Where(kv => nowUtc - kv.Value >= window).Select(kv => kv.Key).ToList())
+                    {
+                        _ = last.Remove(old);
+                    }
                 }
             }
         }
@@ -136,8 +185,14 @@ namespace MouseWithoutBorders.Lite
         private static void OnPeerHello(string peer, PeerInfo info)
         {
             Version theirs = LiteUpdate.ParseVersion(info?.Version);
-            if (string.IsNullOrEmpty(peer) || !ShouldAnnounceToPeer(Setting.Values.UpdateWithOtherPcs, LiteUpdate.Current, theirs) ||
-                !Sent.TryAcquire(peer + "|" + LiteUpdate.CurrentText, DateTime.UtcNow))
+            if (string.IsNullOrEmpty(peer) || !ShouldAnnounceToPeer(Setting.Values.UpdateWithOtherPcs, LiteUpdate.Current, theirs))
+            {
+                return;
+            }
+
+            // Told within the hour: done. Otherwise try, but not more often than every few minutes while it doesn't answer.
+            string key = peer + "|" + LiteUpdate.CurrentText;
+            if (!ShouldSendAnnouncement(Sent, SentAttempts, key, DateTime.UtcNow))
             {
                 return;
             }
@@ -149,6 +204,11 @@ namespace MouseWithoutBorders.Lite
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
                     var args = new JsonObject { ["version"] = LiteUpdate.CurrentText, ["from"] = Common.MachineName };
                     JsonObject reply = await LiteControl.SendAsync(peer, UpdateAvailableOp, args, cts.Token).ConfigureAwait(false);
+                    if (reply != null)
+                    {
+                        Sent.Record(key, DateTime.UtcNow); // it answered (even with "not accepted"), so it isn't asked again for an hour
+                    }
+
                     LiteLog.Write(nameof(LiteAutoUpdate), $"Told {peer} (MwbLite {theirs.ToString(3)}) that {LiteUpdate.CurrentText} is available: " + (reply == null ? "no answer" : reply.ToJsonString()));
                 }
                 catch (Exception e)
@@ -162,7 +222,7 @@ namespace MouseWithoutBorders.Lite
         private static JsonObject OnUpdateAvailable(JsonObject request)
         {
             Version announced = LiteUpdate.ParseVersion(Text(request, "version"));
-            if (!Setting.Values.UpdateWithOtherPcs || !IsNewerThan(announced, LiteUpdate.Current) || !Received.TryAcquire(announced.ToString(3), DateTime.UtcNow))
+            if (!ShouldAcceptAnnouncement(Setting.Values.UpdateWithOtherPcs, announced, LiteUpdate.Current, Received, TriedVersions, DateTime.UtcNow))
             {
                 return new JsonObject { ["accepted"] = false };
             }
@@ -184,6 +244,13 @@ namespace MouseWithoutBorders.Lite
                 PeerUpdateAction action = DecideOnAnnouncement(Setting.Values.UpdateWithOtherPcs, announced, LiteUpdate.Current, latest?.Version, task);
                 LiteLog.Write(nameof(LiteAutoUpdate), $"GitHub's latest is {latest?.Version.ToString(3) ?? "unknown"}; {action}.");
 
+                if (action != PeerUpdateAction.Ignore)
+                {
+                    // Whatever happens next counts as the attempt for this version: a successful update replaces this
+                    // process, so if it is still here a day later the update failed, and peers don't get to ask again.
+                    TriedVersions.Record(announced.ToString(3), DateTime.UtcNow);
+                }
+
                 if (action == PeerUpdateAction.UpdateNow && LiteUpdate.TryStartElevatedUpdate())
                 {
                     LiteTray.NotifyUpdate($"Updating MwbLite to {latest.Version.ToString(3)}… ({from} already runs it.)");
@@ -195,6 +262,7 @@ namespace MouseWithoutBorders.Lite
             }
             catch (Exception e)
             {
+                TriedVersions.Record(announced.ToString(3), DateTime.UtcNow);
                 LiteLog.Write(nameof(LiteAutoUpdate), "Could not act on the update announcement: " + e.Message);
             }
         }
