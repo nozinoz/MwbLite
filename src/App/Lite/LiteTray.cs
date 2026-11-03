@@ -350,8 +350,19 @@ namespace MouseWithoutBorders.Lite
             }
         }
 
-        // Weekly update check; the notification opens Settings > About, where Update is.
+        // Weekly update check; the notification opens Settings > About, where Update is. With "install updates
+        // automatically" the update task is started instead, and the notification only says so.
         private static void CheckForUpdate()
+        {
+            LiteUpdate.MaybeCheckInBackground(
+                Setting.Values.CheckForUpdates,
+                Setting.Values.InstallUpdatesAutomatically,
+                r => NotifyUpdate($"MwbLite {r.Version.ToString(3)} is available (you have {LiteUpdate.CurrentText}). Click here, or open Settings > About, to update."),
+                r => NotifyUpdate($"Updating MwbLite to {r.Version.ToString(3)}… MwbLite will restart."));
+        }
+
+        /// <summary>An update notification (any thread); clicking it opens Settings > About.</summary>
+        internal static void NotifyUpdate(string text) => Common.DoSomethingInUIThread(() =>
         {
             if (!balloonClickHooked && Common.MainForm?.NotifyIcon != null)
             {
@@ -367,12 +378,9 @@ namespace MouseWithoutBorders.Lite
                 Common.MainForm.NotifyIcon.BalloonTipClosed += (_, _) => updateBalloonShown = false;
             }
 
-            LiteUpdate.MaybeCheckInBackground(Setting.Values.CheckForUpdates, r => Common.DoSomethingInUIThread(() =>
-            {
-                updateBalloonShown = true;
-                Common.ShowToolTip($"MwbLite {r.Version.ToString(3)} is available (you have {LiteUpdate.CurrentText}). Click here, or open Settings > About, to update.", 15000, ToolTipIcon.Info, true);
-            }));
-        }
+            updateBalloonShown = true;
+            Common.ShowToolTip(text, 15000, ToolTipIcon.Info, true);
+        });
 
         // ---- reconnect watchdog -------------------------------------------------------------------------------
 

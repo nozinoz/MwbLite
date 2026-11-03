@@ -3,9 +3,14 @@
 // - Check: one HTTPS GET of https://api.github.com/repos/<repo>/releases/latest (nothing about the PC or user is
 //   sent beyond a "MwbLite/<version>" user agent). Weekly in the background (checkForUpdates, default on), and on
 //   demand from Settings > About.
-// - Update: downloads the release's MwbLite-Setup-<version>.exe to the user's temp folder over HTTPS, checks its
-//   size and SHA-256 (the digest GitHub reports for the asset, or the release's SHA256SUMS.txt), then starts it.
-//   Setup shows its own window and asks for the usual UAC approval; it stops and upgrades MwbLite in place.
+// - Update: downloads the release's MwbLite-Setup-<version>.exe over HTTPS, checks its size and SHA-256 (the digest
+//   GitHub reports for the asset, or the release's SHA256SUMS.txt), then installs it. Two ways:
+//   * With the "MwbLite Update" scheduled task (added by Setup, see LiteUpdateTask), TryStartElevatedUpdate starts
+//     the task and LiteUpdater does the download and install as SYSTEM, silently, with no UAC prompt.
+//   * Otherwise the user's MwbLite downloads Setup to its temp folder and starts it; Setup shows its own window and
+//     asks for the usual UAC approval. Either way it stops and upgrades MwbLite in place.
+// - Automatic: with installUpdatesAutomatically on, the weekly check starts the task when it finds a newer release.
+//   LiteAutoUpdate adds updating together with the other PCs.
 using System;
 using System.Globalization;
 using System.IO;
@@ -142,8 +147,15 @@ namespace MouseWithoutBorders.Lite
             return r;
         }
 
-        /// <summary>Downloads the release's Setup, checks size and SHA-256, and returns its path.</summary>
-        internal static async Task<string> DownloadSetupAsync(ReleaseInfo r, IProgress<double> progress, CancellationToken ct)
+        /// <summary>Downloads the release's Setup to the user's temp folder, checks its SHA-256, and returns its path.</summary>
+        internal static async Task<string> DownloadSetupAsync(ReleaseInfo r, IProgress<double> progress, CancellationToken ct) =>
+            (await DownloadVerifiedAsync(r, progress, Path.Combine(Path.GetTempPath(), "MwbLite-update"), ct).ConfigureAwait(false)).Path;
+
+        /// <summary>A downloaded Setup and the SHA-256 (lower-case hex) it was verified against.</summary>
+        internal sealed record VerifiedSetup(string Path, string Sha256);
+
+        /// <summary>Downloads the release's Setup into <paramref name="dir"/> and checks its SHA-256.</summary>
+        internal static async Task<VerifiedSetup> DownloadVerifiedAsync(ReleaseInfo r, IProgress<double> progress, string dir, CancellationToken ct)
         {
             if (string.IsNullOrEmpty(r.SetupUrl) || !r.SetupUrl.StartsWith("https://github.com/" + Repo + "/releases/download/", StringComparison.OrdinalIgnoreCase))
             {
@@ -163,7 +175,6 @@ namespace MouseWithoutBorders.Lite
                 throw new InvalidOperationException("The release has no checksum for its Setup, so it can't be verified.");
             }
 
-            string dir = Path.Combine(Path.GetTempPath(), "MwbLite-update");
             Directory.CreateDirectory(dir);
             string path = Path.Combine(dir, Path.GetFileName(r.SetupName));
             using (HttpResponseMessage response = await http.GetAsync(r.SetupUrl, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
@@ -199,8 +210,11 @@ namespace MouseWithoutBorders.Lite
             }
 
             LiteLog.Write(nameof(LiteUpdate), $"Downloaded {r.SetupName} ({actual}).");
-            return path;
+            return new VerifiedSetup(path, actual.ToLowerInvariant());
         }
+
+        /// <summary>SHA-256 of a stream as lower-case hex.</summary>
+        internal static string Sha256Hex(Stream s) => Convert.ToHexString(SHA256.HashData(s)).ToLowerInvariant();
 
         /// <summary>The hash for a file in a SHA256SUMS.txt ("&lt;hash&gt;  &lt;name&gt;" lines), or null.</summary>
         internal static string ShaFromSums(string sums, string fileName)
@@ -222,6 +236,17 @@ namespace MouseWithoutBorders.Lite
             LiteLog.Write(nameof(LiteUpdate), "Starting " + path);
             _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
         }
+
+        // ---- updating without a UAC prompt (the "MwbLite Update" task) ------------------------------------------
+
+        /// <summary>True if the update task exists, so <see cref="TryStartElevatedUpdate"/> can work.</summary>
+        internal static bool CanUpdateWithoutPrompt() => LiteUpdateTask.Exists();
+
+        /// <summary>
+        /// Starts the update task: it installs the newest release as SYSTEM and restarts MwbLite, without elevation
+        /// or a prompt. False if there is no task (not installed with Setup) or it can't be started.
+        /// </summary>
+        internal static bool TryStartElevatedUpdate() => LiteUpdateTask.TryRun();
 
         // ---- weekly background check (engine process) -----------------------------------------------------
 
@@ -272,10 +297,11 @@ namespace MouseWithoutBorders.Lite
         }
 
         /// <summary>
-        /// Called from the tray timer: once a week (if checkForUpdates is on) asks GitHub for the latest release and,
-        /// the first time a newer one is seen, shows <paramref name="notify"/> with it.
+        /// Called from the tray timer: once a week (if checkForUpdates is on) asks GitHub for the latest release. If a
+        /// newer one is out and <paramref name="autoInstall"/> is on and the update task starts, calls
+        /// <paramref name="installing"/>; otherwise, the first time that release is seen, calls <paramref name="notify"/>.
         /// </summary>
-        internal static void MaybeCheckInBackground(bool enabled, Action<ReleaseInfo> notify)
+        internal static void MaybeCheckInBackground(bool enabled, bool autoInstall, Action<ReleaseInfo> notify, Action<ReleaseInfo> installing)
         {
             if (!enabled || DateTime.UtcNow - ReadState().LastCheckUtc < CheckInterval || Interlocked.Exchange(ref checking, 1) == 1)
             {
@@ -288,7 +314,14 @@ namespace MouseWithoutBorders.Lite
                 {
                     ReleaseInfo r = await GetLatestAsync(CancellationToken.None).ConfigureAwait(false);
                     CheckState s = ReadState();
-                    if (IsNewer(r) && s.NotifiedVersion != r.Version.ToString(3))
+                    if (LiteAutoUpdate.ShouldInstallAutomatically(autoInstall, r, Current) && TryStartElevatedUpdate())
+                    {
+                        s.NotifiedVersion = r.Version.ToString(3);
+                        WriteState(s);
+                        LiteLog.Write(nameof(LiteUpdate), $"Installing {r.Version.ToString(3)} automatically.");
+                        installing(r);
+                    }
+                    else if (IsNewer(r) && s.NotifiedVersion != r.Version.ToString(3))
                     {
                         s.NotifiedVersion = r.Version.ToString(3);
                         WriteState(s);

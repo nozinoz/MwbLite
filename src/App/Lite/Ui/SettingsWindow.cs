@@ -74,6 +74,8 @@ namespace MouseWithoutBorders.Lite.Ui
 
         // About
         private readonly CheckBox checkForUpdates = Kit.Switch();
+        private readonly CheckBox installUpdatesAutomatically = Kit.Switch();
+        private readonly CheckBox updateWithOtherPcs = Kit.Switch();
         private readonly TextBlock updateStatus = new() { FontSize = 16, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
         private readonly TextBlock updateDetail = Kit.Hint(string.Empty);
         private readonly TextBox releaseNotes = new() { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, MaxHeight = 220, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 10, 0, 0) };
@@ -462,6 +464,8 @@ namespace MouseWithoutBorders.Lite.Ui
             transferFile.IsEnabled = cfg.ShareClipboard;
             showTransferProgress.IsChecked = cfg.ShowTransferProgress;
             checkForUpdates.IsChecked = cfg.CheckForUpdates;
+            installUpdatesAutomatically.IsChecked = cfg.InstallUpdatesAutomatically;
+            updateWithOtherPcs.IsChecked = cfg.UpdateWithOtherPcs;
             startWithWindows.IsChecked = cfg.StartWithWindows;
             useService.IsChecked = cfg.UseService;
 
@@ -507,6 +511,8 @@ namespace MouseWithoutBorders.Lite.Ui
             cfg.TransferFile = transferFile.IsChecked == true;
             cfg.ShowTransferProgress = showTransferProgress.IsChecked == true;
             cfg.CheckForUpdates = checkForUpdates.IsChecked == true;
+            cfg.InstallUpdatesAutomatically = installUpdatesAutomatically.IsChecked == true;
+            cfg.UpdateWithOtherPcs = updateWithOtherPcs.IsChecked == true;
             cfg.StartWithWindows = startWithWindows.IsChecked == true;
             cfg.UseService = useService.IsChecked == true;
 

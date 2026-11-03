@@ -8,6 +8,10 @@
 //   MwbLite.exe --settings      open the Settings window (edits %LOCALAPPDATA%\MwbLite\settings.json).
 //   MwbLite.exe --open-config   open %LOCALAPPDATA%\MwbLite\settings.json in Notepad.
 //   MwbLite.exe --service       service entry point (used by the Service Control Manager only).
+//   MwbLite.exe --register-update-task / --unregister-update-task
+//                               create/delete the "MwbLite Update" scheduled task (run by Setup, as SYSTEM).
+//   MwbLite.exe --install-update
+//                               what that task runs (as SYSTEM): install the newest release, see LiteUpdater.
 //
 // The "-elevated" variants are what the commands above re-launch through a UAC prompt.
 using System;
@@ -111,6 +115,15 @@ namespace MouseWithoutBorders.Lite
                         DeleteDirectory(LitePaths.ServiceDir);
                         return 0;
 
+                    // Run by the Setup installer as SYSTEM (after copying files / before removing them), and by the task
+                    // itself. No window can be shown there, so these report through the log and the exit code only.
+                    case "--register-update-task":
+                    case "--unregister-update-task":
+                        return UpdateTaskCommand(register: cmd == "--register-update-task");
+
+                    case "--install-update":
+                        return LiteUpdater.Run(args);
+
                     case "--install-elevated":
                     case "--apply-config-elevated":
                     case "--uninstall-elevated":
@@ -184,6 +197,56 @@ namespace MouseWithoutBorders.Lite
             cfg.Save(path);
             LiteLog.Write(nameof(LiteCommands), "Start with Windows turned on in " + path);
             return true;
+        }
+
+        /// <summary>
+        /// "--register-update-task" / "--unregister-update-task". Registering is only done for the copy Setup installed
+        /// in Program Files: a SYSTEM task must never point at a program a standard user can replace.
+        /// </summary>
+        private static int UpdateTaskCommand(bool register)
+        {
+            if (!IsElevated())
+            {
+                return 5;
+            }
+
+            try
+            {
+                LitePaths.EnsureProtectedDirectory(LitePaths.ServiceDir);
+                LiteLog.Initialize(Path.Combine(LitePaths.ServiceDir, "logs"), "install");
+                if (!register)
+                {
+                    LiteUpdateTask.Unregister();
+                }
+                else if (IsInstalledExe(LitePaths.ExePath, LitePaths.InstallDir))
+                {
+                    LiteUpdateTask.Register(LitePaths.ExePath);
+                }
+                else
+                {
+                    LiteLog.Write(nameof(LiteCommands), "Not adding the update task for " + LitePaths.ExePath + ": it isn't the copy in " + LitePaths.InstallDir + ".");
+                    return 3;
+                }
+
+                return 0;
+            }
+            catch (Exception e)
+            {
+                LiteLog.Write(nameof(LiteCommands), (register ? "--register-update-task" : "--unregister-update-task") + " failed: " + e);
+                return 1;
+            }
+        }
+
+        /// <summary>True if <paramref name="exePath"/> is MwbLite.exe directly inside <paramref name="installDir"/>.</summary>
+        internal static bool IsInstalledExe(string exePath, string installDir)
+        {
+            if (string.IsNullOrEmpty(exePath) || string.IsNullOrEmpty(installDir))
+            {
+                return false;
+            }
+
+            string expected = Path.GetFullPath(Path.Combine(installDir, MainExeName));
+            return string.Equals(Path.GetFullPath(exePath), expected, StringComparison.OrdinalIgnoreCase);
         }
 
         // ---- unelevated parts --------------------------------------------------------------
@@ -479,7 +542,7 @@ namespace MouseWithoutBorders.Lite
             }
         }
 
-        private static void DeleteDirectory(string dir)
+        internal static void DeleteDirectory(string dir)
         {
             if (!Directory.Exists(dir))
             {
@@ -572,7 +635,7 @@ namespace MouseWithoutBorders.Lite
             return opts;
         }
 
-        private static bool IsElevated()
+        internal static bool IsElevated()
         {
             using var identity = WindowsIdentity.GetCurrent();
             return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);

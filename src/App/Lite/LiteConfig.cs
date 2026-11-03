@@ -66,6 +66,18 @@ namespace MouseWithoutBorders.Lite
         /// <summary>Check GitHub Releases for a new version once a week (Settings > About can always check).</summary>
         public bool CheckForUpdates { get; set; } = true;
 
+        /// <summary>
+        /// Install a new version by itself when the weekly check finds one (no prompt). Needs MwbLite installed with
+        /// Setup, which adds the administrator task that does it.
+        /// </summary>
+        public bool InstallUpdatesAutomatically { get; set; }
+
+        /// <summary>
+        /// Update this PC when a connected MwbLite PC announces a newer version, and tell connected PCs that are older
+        /// than this one to update. Both only ever lead to the latest release published on GitHub.
+        /// </summary>
+        public bool UpdateWithOtherPcs { get; set; } = true;
+
         public bool StartWithWindows { get; set; }
 
         /// <summary>Run through the MwbLite.Service Windows service (lock screen / UAC prompt support). Needs "--install".</summary>
