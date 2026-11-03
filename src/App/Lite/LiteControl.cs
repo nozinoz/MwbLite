@@ -55,6 +55,8 @@ namespace MouseWithoutBorders.Lite
         /// </summary>
         internal static event Action<string, PeerInfo> PeerHello;
 
+        private static void OnPeerHello(string peer, PeerInfo info) => PeerHello?.Invoke(peer, info);
+
         /// <summary>Asks a PC who it is. Null if it didn't answer. Also records its MAC addresses for Wake.</summary>
         internal static Task<PeerInfo> HelloAsync(string peer, CancellationToken ct) => throw new NotImplementedException();
     }
