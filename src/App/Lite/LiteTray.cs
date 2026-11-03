@@ -268,6 +268,12 @@ namespace MouseWithoutBorders.Lite
         private static bool olderVersionNotified;
         private static bool statusDirReady;
 
+        // Balloons when a PC drops off or comes back (the rules are in LiteConnectionNotices).
+        private static readonly LiteConnectionNotices ConnectionNotices = new(Process.GetCurrentProcess().StartTime.ToUniversalTime());
+
+        /// <summary>This PC is going to sleep or has woken up: the links are about to close and reopen, which isn't news.</summary>
+        internal static void NotePowerChange() => ConnectionNotices.PowerChanged(DateTime.UtcNow);
+
         /// <summary>Called by FrmScreen.HelperTimer_Tick (UI thread, every 100 ms).</summary>
         internal static void OnTimer()
         {
@@ -305,6 +311,11 @@ namespace MouseWithoutBorders.Lite
 
                 StatusSnapshot status = LiteStatus.Refresh();
                 Redial(status, now);
+                foreach (string notice in ConnectionNotices.Update(now, status.Pcs, Setting.Values.NotifyConnectionChanges))
+                {
+                    Common.ShowToolTip(notice, 5000, ToolTipIcon.Info, true);
+                }
+
                 string signature = status.Signature + "|" + Ui.TaskbarTheme.IsLight; // a theme change redraws the glyph
                 if (signature != lastSignature)
                 {

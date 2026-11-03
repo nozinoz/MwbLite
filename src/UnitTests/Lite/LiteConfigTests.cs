@@ -56,6 +56,21 @@ public sealed class LiteConfigTests
     }
 
     [TestMethod]
+    public void ConnectionNoticesAreOnByDefaultAndTheChoiceIsKept()
+    {
+        var cfg = LiteConfig.CreateDefault();
+        Assert.IsTrue(cfg.NotifyConnectionChanges);
+
+        cfg.NotifyConnectionChanges = false;
+        string path = Path.Combine(dir, "settings.json");
+        cfg.Save(path);
+        Assert.IsFalse(LiteConfig.TryParse(path, out _)!.NotifyConnectionChanges);
+
+        File.WriteAllText(path, "{ }");
+        Assert.IsTrue(LiteConfig.TryParse(path, out _)!.NotifyConnectionChanges, "a file without the setting gets the default");
+    }
+
+    [TestMethod]
     public void ParsesCommentsTrailingCommasAndNormalizesNamesAndKey()
     {
         string path = Write("""

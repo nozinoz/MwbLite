@@ -1,0 +1,31 @@
+# Template: tools/make-winget-manifest.ps1 fills in the placeholders and writes the result to out\winget\<version>.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+
+PackageIdentifier: nozinoz.MwbLite
+PackageVersion: __VERSION__
+PackageLocale: en-US
+Publisher: nozinoz
+PublisherUrl: https://github.com/nozinoz
+PublisherSupportUrl: https://github.com/__REPO__/issues
+PackageName: MwbLite
+PackageUrl: https://github.com/__REPO__
+License: MIT
+LicenseUrl: https://github.com/__REPO__/blob/main/LICENSE
+Copyright: Copyright (c) Microsoft Corporation. MwbLite is derived from Mouse Without Borders in PowerToys (MIT).
+ShortDescription: One keyboard, mouse and clipboard for all your Windows PCs, based on Mouse Without Borders from PowerToys.
+Description: |-
+  MwbLite is Mouse Without Borders (MWB) carved out of Microsoft PowerToys so it runs on its own, as a tray app
+  with a Settings window. Move the mouse across the edge of one screen onto another PC, type with one keyboard,
+  and share the clipboard and files between up to four Windows PCs. PCs are paired with a 6-digit code, and
+  connections are encrypted. It has no PowerToys runner, updater or telemetry.
+Moniker: mwblite
+Tags:
+- clipboard
+- keyboard
+- mouse
+- mouse-without-borders
+- multi-pc
+- powertoys
+ReleaseNotesUrl: https://github.com/__REPO__/releases/tag/v__VERSION__
+ManifestType: defaultLocale
+ManifestVersion: 1.10.0

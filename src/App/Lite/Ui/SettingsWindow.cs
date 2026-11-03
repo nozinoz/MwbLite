@@ -80,11 +80,13 @@ namespace MouseWithoutBorders.Lite.Ui
         private readonly ProgressBar updateProgress = new() { Height = 4, Maximum = 1, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 10, 0, 0) };
         private WpfButton checkUpdateButton;
         private WpfButton updateButton;
+        private WpfButton saveDiagnosticsButton;
         private ReleaseInfo latestRelease;
 
         // Connection
         private readonly CheckBox startWithWindows = Kit.Switch();
         private readonly CheckBox useService = Kit.Switch();
+        private readonly CheckBox notifyConnectionChanges = Kit.Switch();
         private readonly StackPanel checkResults = new();
         private readonly TextBlock checkSummary = Kit.Hint(string.Empty);
         private readonly WpfButton checkButton;
@@ -340,6 +342,7 @@ namespace MouseWithoutBorders.Lite.Ui
                 Kit.PageTitle("Connection"),
                 Kit.Row("", "Start with Windows", "Start MwbLite when you sign in.", startWithWindows),
                 Kit.Row("", "Control the lock screen and UAC prompts", "Service mode. Needs a one-time admin install; takes effect after MwbLite restarts.", useService),
+                Kit.Row("", "Tell me when a PC connects or drops off", "A notification when a PC that was connected has been gone for 20 seconds, and when it is back. Quiet for 2 minutes after MwbLite starts or this PC wakes up.", notifyConnectionChanges),
                 Kit.Section("Check connection"),
                 Kit.Card(Kit.Stack(
                     Kit.Hint("Tests this PC's settings, firewall and service, then tries a secure connection to each PC with your security key."),
@@ -464,6 +467,7 @@ namespace MouseWithoutBorders.Lite.Ui
             checkForUpdates.IsChecked = cfg.CheckForUpdates;
             startWithWindows.IsChecked = cfg.StartWithWindows;
             useService.IsChecked = cfg.UseService;
+            notifyConnectionChanges.IsChecked = cfg.NotifyConnectionChanges;
 
             var adv = cfg.Advanced;
             tcpPort.Text = adv.TcpPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -509,6 +513,7 @@ namespace MouseWithoutBorders.Lite.Ui
             cfg.CheckForUpdates = checkForUpdates.IsChecked == true;
             cfg.StartWithWindows = startWithWindows.IsChecked == true;
             cfg.UseService = useService.IsChecked == true;
+            cfg.NotifyConnectionChanges = notifyConnectionChanges.IsChecked == true;
 
             var adv = cfg.Advanced;
             adv.TcpPort = int.TryParse(tcpPort.Text.Trim(), out int port) ? port : -1;

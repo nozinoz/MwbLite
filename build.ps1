@@ -117,10 +117,12 @@ if ($LASTEXITCODE -eq 0 -and $commit) {
     $common += "-p:SourceRevisionId=$commit"
 }
 
-# a) Portable: two self-contained single-file exes (no .NET install needed). No compression: compressed
-#    bundles are inflated into private memory at startup (~3x the RAM).
+# a) Portable: two self-contained single-file exes (no .NET install needed), compressed: about 78 MB instead of
+#    178 MB each. The price is that the bundle is inflated into private memory at startup (measured on the Settings
+#    window: about 80 MB more RAM and 70 ms more start time). The installed (framework-dependent) build is not
+#    compressed.
 $singleFile = $common + @('--self-contained', 'true', '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true',
-    '-p:EnableCompressionInSingleFile=false', '-o', $portable)
+    '-p:EnableCompressionInSingleFile=true', '-o', $portable)
 Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\MwbLite.csproj')) + $singleFile)
 Invoke-Checked $dotnet (@('publish', (Join-Path $root 'src\App\Helper\MwbLite.Helper.csproj')) + $singleFile)
 
