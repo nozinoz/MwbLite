@@ -16,7 +16,7 @@ namespace MouseWithoutBorders.Lite
     internal static class LiteReleaseKey
     {
         // The line below is rewritten by tools\release-key.ps1 -New: keep its form (const string, one line).
-        internal const string PublicKeyBase64 = "PLACEHOLDER-RUN-tools-release-key.ps1--New";
+        internal const string PublicKeyBase64 = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1EhG5xeevUYhi1HkdcdRJZQxhA9Nh2pSc7fn1RnjoUtM6QqvtxD/FVK0zDMclFHbm+N/kEb+I4rCBGmH38QLYQ==";
 
         // OID of the NIST P-256 curve (secp256r1 / prime256v1).
         private const string P256Oid = "1.2.840.10045.3.1.7";
