@@ -283,6 +283,22 @@ internal static class MachineStuff
 
 #endif
 
+    // MwbLite: line up screens of different sizes. Maps the coordinate along the shared edge of a crossing's target point
+    // (universal 0..65535) through the user's alignment entries (Settings > PCs > Line up screens); with no entry for the
+    // pair the point is returned as MWB computed it. Called once on every return path of MoveLeft/Right/Up/Down.
+    private static Point AlignEdge(Point universal, string currentMachine, Lite.EdgeDirection direction)
+    {
+        try
+        {
+            return Lite.LiteEdgeAlignment.Apply(Setting.Values.EdgeAlignment, currentMachine, NameFromID(newDesMachineIdEx), direction, universal);
+        }
+        catch (Exception e)
+        {
+            Logger.Log(e);
+            return universal;
+        }
+    }
+
     [SuppressMessage("Microsoft.Maintainability", "CA1502:AvoidExcessiveComplexity", Justification = "Dotnet port with style preservation")]
     private static Point MoveRight(int x, int y)
     {
@@ -388,7 +404,7 @@ internal static class MachineStuff
                     /* Switching back to the controller machine, we need to scale up to the desktopBounds from primaryScreenBounds (sine !Setting.Values.MoveMouseRelatively).
                      * primaryScreenBounds => 65535 => desktopBounds, so that the Mouse position is mapped to the right position when the controller machine has multiple monitors.
                      * */
-                    return ConvertToUniversalValue(new Point(primaryScreenBounds.Left + JUMP_PIXELS, y), primaryScreenBounds);
+                    return AlignEdge(ConvertToUniversalValue(new Point(primaryScreenBounds.Left + JUMP_PIXELS, y), primaryScreenBounds), currentMachine, Lite.EdgeDirection.Right);
                 }
                 else
                 {
@@ -398,7 +414,7 @@ internal static class MachineStuff
                          * Mouse position can just be mapped from desktopBounds to desktopBounds
                          * desktopBounds => 65535 => desktopBounds.
                          * */
-                        return ConvertToUniversalValue(new Point(desktopBounds.Left + JUMP_PIXELS, y), desktopBounds);
+                        return AlignEdge(ConvertToUniversalValue(new Point(desktopBounds.Left + JUMP_PIXELS, y), desktopBounds), currentMachine, Lite.EdgeDirection.Right);
                     }
                     else
                     {
@@ -407,7 +423,7 @@ internal static class MachineStuff
                          * new Mouse position for the new controlled machine needs to be calculated from this as well.
                          * primaryScreenBounds => 65535 => desktopBounds
                          * */
-                        return ConvertToUniversalValue(new Point(primaryScreenBounds.Left + JUMP_PIXELS, y), primaryScreenBounds);
+                        return AlignEdge(ConvertToUniversalValue(new Point(primaryScreenBounds.Left + JUMP_PIXELS, y), primaryScreenBounds), currentMachine, Lite.EdgeDirection.Right);
                     }
                 }
             }
@@ -416,7 +432,7 @@ internal static class MachineStuff
                 /* In the case where Mouse is moved relatively, Mouse position is simply mapped from desktopBounds to desktopBounds.
                  * desktopBounds => 65535 => desktopBounds.
                  * */
-                return ConvertToUniversalValue(new Point(desktopBounds.Left + JUMP_PIXELS, y), desktopBounds);
+                return AlignEdge(ConvertToUniversalValue(new Point(desktopBounds.Left + JUMP_PIXELS, y), desktopBounds), currentMachine, Lite.EdgeDirection.Right);
             }
         }
 
@@ -520,13 +536,16 @@ internal static class MachineStuff
         {
             Logger.LogDebug("Move Left");
 
-            return !Setting.Values.MoveMouseRelatively
-                ? newDesMachineIdEx == Common.MachineID
-                    ? ConvertToUniversalValue(new Point(primaryScreenBounds.Right - JUMP_PIXELS, y), primaryScreenBounds)
-                    : desMachineID == Common.MachineID
-                        ? ConvertToUniversalValue(new Point(desktopBounds.Right - JUMP_PIXELS, y), desktopBounds)
-                        : ConvertToUniversalValue(new Point(primaryScreenBounds.Right - JUMP_PIXELS, y), primaryScreenBounds)
-                : ConvertToUniversalValue(new Point(desktopBounds.Right - JUMP_PIXELS, y), desktopBounds);
+            return AlignEdge(
+                !Setting.Values.MoveMouseRelatively
+                    ? newDesMachineIdEx == Common.MachineID
+                        ? ConvertToUniversalValue(new Point(primaryScreenBounds.Right - JUMP_PIXELS, y), primaryScreenBounds)
+                        : desMachineID == Common.MachineID
+                            ? ConvertToUniversalValue(new Point(desktopBounds.Right - JUMP_PIXELS, y), desktopBounds)
+                            : ConvertToUniversalValue(new Point(primaryScreenBounds.Right - JUMP_PIXELS, y), primaryScreenBounds)
+                    : ConvertToUniversalValue(new Point(desktopBounds.Right - JUMP_PIXELS, y), desktopBounds),
+                currentMachine,
+                Lite.EdgeDirection.Left);
         }
 
         return Point.Empty;
@@ -589,13 +608,16 @@ internal static class MachineStuff
         {
             Logger.LogDebug("Move Up");
 
-            return !Setting.Values.MoveMouseRelatively
-                ? newDesMachineIdEx == Common.MachineID
-                    ? ConvertToUniversalValue(new Point(x, primaryScreenBounds.Bottom - JUMP_PIXELS), primaryScreenBounds)
-                    : desMachineID == Common.MachineID
-                        ? ConvertToUniversalValue(new Point(x, desktopBounds.Bottom - JUMP_PIXELS), desktopBounds)
-                        : ConvertToUniversalValue(new Point(x, primaryScreenBounds.Bottom - JUMP_PIXELS), primaryScreenBounds)
-                : ConvertToUniversalValue(new Point(x, desktopBounds.Bottom - JUMP_PIXELS), desktopBounds);
+            return AlignEdge(
+                !Setting.Values.MoveMouseRelatively
+                    ? newDesMachineIdEx == Common.MachineID
+                        ? ConvertToUniversalValue(new Point(x, primaryScreenBounds.Bottom - JUMP_PIXELS), primaryScreenBounds)
+                        : desMachineID == Common.MachineID
+                            ? ConvertToUniversalValue(new Point(x, desktopBounds.Bottom - JUMP_PIXELS), desktopBounds)
+                            : ConvertToUniversalValue(new Point(x, primaryScreenBounds.Bottom - JUMP_PIXELS), primaryScreenBounds)
+                    : ConvertToUniversalValue(new Point(x, desktopBounds.Bottom - JUMP_PIXELS), desktopBounds),
+                currentMachine,
+                Lite.EdgeDirection.Up);
         }
 
         return Point.Empty;
@@ -659,13 +681,16 @@ internal static class MachineStuff
         {
             Logger.LogDebug("Move Down");
 
-            return !Setting.Values.MoveMouseRelatively
-                ? newDesMachineIdEx == Common.MachineID
-                    ? ConvertToUniversalValue(new Point(x, primaryScreenBounds.Top + JUMP_PIXELS), primaryScreenBounds)
-                    : desMachineID == Common.MachineID
-                        ? ConvertToUniversalValue(new Point(x, desktopBounds.Top + JUMP_PIXELS), desktopBounds)
-                        : ConvertToUniversalValue(new Point(x, primaryScreenBounds.Top + JUMP_PIXELS), primaryScreenBounds)
-                : ConvertToUniversalValue(new Point(x, desktopBounds.Top + JUMP_PIXELS), desktopBounds);
+            return AlignEdge(
+                !Setting.Values.MoveMouseRelatively
+                    ? newDesMachineIdEx == Common.MachineID
+                        ? ConvertToUniversalValue(new Point(x, primaryScreenBounds.Top + JUMP_PIXELS), primaryScreenBounds)
+                        : desMachineID == Common.MachineID
+                            ? ConvertToUniversalValue(new Point(x, desktopBounds.Top + JUMP_PIXELS), desktopBounds)
+                            : ConvertToUniversalValue(new Point(x, primaryScreenBounds.Top + JUMP_PIXELS), primaryScreenBounds)
+                    : ConvertToUniversalValue(new Point(x, desktopBounds.Top + JUMP_PIXELS), desktopBounds),
+                currentMachine,
+                Lite.EdgeDirection.Down);
         }
 
         return Point.Empty;

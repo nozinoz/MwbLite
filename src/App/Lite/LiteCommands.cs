@@ -89,6 +89,16 @@ namespace MouseWithoutBorders.Lite
 
                         return 0;
 
+                    // Started (as the user) by a service-mode instance after a peer changed the screen alignment.
+                    case "--set-alignment":
+                        LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");
+                        if (args.Length >= 3 && LiteEdgeAlignment.Decode(args[2]) is { } alignment)
+                        {
+                            _ = LiteAlignmentSync.TryPersist(LitePaths.UserSettingsFile, alignment);
+                        }
+
+                        return 0;
+
                     // Run by Setup as the installing user when "Start MwbLite when I sign in" is ticked.
                     case "--enable-startup":
                         LiteLog.Initialize(Path.Combine(LitePaths.UserDir, "logs"), "commands");

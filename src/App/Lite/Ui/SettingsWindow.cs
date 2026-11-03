@@ -66,6 +66,9 @@ namespace MouseWithoutBorders.Lite.Ui
         private readonly RadioButton twoRows = new() { Content = "Two rows (2 × 2)", GroupName = "rows" };
         private readonly CheckBox wrapMouse = Kit.Switch();
         private readonly StackPanel pcList = new();
+        private readonly StackPanel alignmentList = new();
+        private List<EdgeAlignmentEntry> alignment = new(); // every entry in the loaded config, kept while the layout changes
+        private string alignmentSignature = string.Empty;
 
         // Clipboard & files
         private readonly CheckBox shareClipboard = Kit.Switch();
@@ -146,7 +149,8 @@ namespace MouseWithoutBorders.Lite.Ui
             }
 
             layout.ThisPc = ThisPc;
-            layoutView = new LayoutEditorView(layout) { Margin = new Thickness(0, 6, 0, 6) };
+            layout.Redraw += (_, _) => RebuildAlignment(force: false);
+            layoutView =new LayoutEditorView(layout) { Margin = new Thickness(0, 6, 0, 6) };
             layoutView.StateOf = name => LastStatus?.Pcs.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.State;
             checkButton = Kit.Button("Check now", (_, _) => StartCheck(), accent: true);
             fixFirewall = Kit.Button("Fix firewall…", (_, _) => FixFirewall());
@@ -318,6 +322,10 @@ namespace MouseWithoutBorders.Lite.Ui
                     Kit.Hint("Drag the PCs to match where they sit. The cursor crosses to a PC by leaving the screen on that side. Double-click to rename or add, Delete to remove. Other PCs follow when you apply."))),
                 Kit.Row("", "Wrap the cursor around the outer edges", "Leaving the last PC brings the cursor back to the first.", wrapMouse),
                 Kit.Row("", "Add this PC to the layout", "Puts " + ThisPc + " in the first empty slot.", addThis),
+                Kit.Section("Line up screens"),
+                Kit.Card(Kit.Stack(
+                    Kit.Hint("If two neighbouring screens are different sizes, or one sits lower on the desk, line them up here so the cursor comes out where you expect instead of at the same relative height. Other PCs follow when you apply."),
+                    alignmentList)),
                 Kit.Section("Status"),
                 Kit.Card(pcList));
 
@@ -447,6 +455,7 @@ namespace MouseWithoutBorders.Lite.Ui
             }
 
             layoutView.Rebuild();
+            UpdateRealSizeAvailability();
         }
 
         // ---- values ---------------------------------------------------------------------------------------
@@ -459,6 +468,8 @@ namespace MouseWithoutBorders.Lite.Ui
             oneRow.IsChecked = cfg.Layout.OneRow;
             twoRows.IsChecked = !cfg.Layout.OneRow;
             wrapMouse.IsChecked = cfg.Layout.WrapMouse;
+            alignment = cfg.Advanced.EdgeAlignment.Select(e => e.Clone()).ToList();
+            RebuildAlignment(force: true);
 
             shareClipboard.IsChecked = cfg.ShareClipboard;
             transferFile.IsChecked = cfg.TransferFile;
@@ -535,6 +546,7 @@ namespace MouseWithoutBorders.Lite.Ui
             adv.ShowClipboardAndNetworkStatusMessages = showStatusMessages.IsChecked == true;
             adv.DisableEasyMouseWhenForegroundWindowIsFullscreen = noEasyMouseFullscreen.IsChecked == true;
             adv.AllowInsecureConnections = allowInsecure.IsChecked == true;
+            adv.EdgeAlignment = LiteEdgeAlignment.ForLayout(alignment, layout.Slots, cfg.Layout.OneRow); // pairs that aren't neighbours any more are dropped
 
             cfg.Normalize();
             return cfg;
@@ -566,7 +578,11 @@ namespace MouseWithoutBorders.Lite.Ui
             if (errors.Count > 0)
             {
                 SetMessage(string.Join("\n", errors.Select(Friendly)), ok: false);
-                if (errors.Any(e => e.StartsWith("advanced.", StringComparison.Ordinal) || e.StartsWith("securityKey", StringComparison.Ordinal)))
+                if (errors.Any(e => e.StartsWith("advanced.edgeAlignment", StringComparison.Ordinal)))
+                {
+                    nav.SelectedIndex = Array.FindIndex(Pages, p => p.Title == "PCs");
+                }
+                else if (errors.Any(e => e.StartsWith("advanced.", StringComparison.Ordinal) || e.StartsWith("securityKey", StringComparison.Ordinal)))
                 {
                     nav.SelectedIndex = Array.FindIndex(Pages, p => p.Title == "Advanced");
                 }
@@ -815,6 +831,11 @@ namespace MouseWithoutBorders.Lite.Ui
                 return error.Contains("another Windows account", StringComparison.Ordinal)
                     ? "Security key (Advanced): " + error[(colon + 2)..]
                     : "Security key (Advanced): use at least 16 characters (spaces are ignored), or pair the PCs again.";
+            }
+
+            if (key.StartsWith("advanced.edgeAlignment", StringComparison.Ordinal))
+            {
+                return "Line up screens: " + error[(colon + 2)..];
             }
 
             string label = key switch

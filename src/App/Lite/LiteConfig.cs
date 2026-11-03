@@ -121,6 +121,12 @@ namespace MouseWithoutBorders.Lite
             public List<string> Name2Ip { get; set; } = new();
 
             public HotkeysConfig Hotkeys { get; set; } = new();
+
+            /// <summary>
+            /// Lines up screens of different sizes: where a PC's screen edge sits along its neighbour's (see LiteEdgeAlignment).
+            /// Set in Settings > PCs > Line up screens; kept the same on every PC.
+            /// </summary>
+            public List<EdgeAlignmentEntry> EdgeAlignment { get; set; } = new();
         }
 
         internal sealed class HotkeysConfig
@@ -237,6 +243,10 @@ namespace MouseWithoutBorders.Lite
             Advanced.Hotkeys ??= new HotkeysConfig();
             Advanced.Name2Ip ??= new List<string>();
             Advanced.EasyMouseFullscreenExcludedApps ??= new List<string>();
+            Advanced.EdgeAlignment = (Advanced.EdgeAlignment ?? new List<EdgeAlignmentEntry>())
+                .Where(e => e != null)
+                .Select(e => new EdgeAlignmentEntry { From = NormalizeName(e.From), To = NormalizeName(e.To), Start = e.Start, End = e.End })
+                .ToList();
             Machines = (Machines ?? new List<string>()).Select(NormalizeName).ToList();
             SecurityKey = NormalizeKey(SecurityKey);
         }
@@ -301,6 +311,15 @@ namespace MouseWithoutBorders.Lite
                 if (parts.Length < 2 || !System.Net.IPAddress.TryParse(parts[1], out _))
                 {
                     errors.Add($"advanced.name2Ip: \"{entry}\" must look like \"NAME 192.168.1.20\".");
+                }
+            }
+
+            // Entries for PCs that aren't neighbours (any more) are not an error: they are ignored.
+            for (int i = 0; i < Advanced.EdgeAlignment.Count; i++)
+            {
+                if (LiteEdgeAlignment.Problem(Advanced.EdgeAlignment[i]) is string problem)
+                {
+                    errors.Add($"advanced.edgeAlignment[{i}]: {problem}");
                 }
             }
 

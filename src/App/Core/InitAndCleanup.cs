@@ -122,6 +122,7 @@ internal static class InitAndCleanup
         bool dummy = Setting.Values.DrawMouseEx;
         Common.Is64bitOS = IntPtr.Size == 8;
         Common.tcpPort = Setting.Values.TcpPort;
+        Lite.LiteAlignmentSync.Register(); // MwbLite: receive the screen alignment other PCs send
         WinAPI.GetScreenConfig();
         Package.PackageSent = new PackageMonitor(0);
         Package.PackageReceived = new PackageMonitor(0);
