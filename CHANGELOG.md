@@ -3,6 +3,11 @@
 Each version's section is also its GitHub Release notes (see `tools/publish-release.ps1`), and Settings > About
 shows them for the latest release. Upgrade every PC to the same version.
 
+## 0.8.4
+
+- Settings buttons now work like a classic Windows dialog: **Apply and close** (like OK) saves your changes and
+  closes, **Cancel** discards them, and **Apply** saves and keeps the window open.
+
 ## 0.8.3
 
 - Settings has **Apply**, **Close** and **Cancel**: Apply saves and applies your changes and keeps the window open,

@@ -208,8 +208,9 @@ sidebar, cards and switches, and light or dark mode following Windows (it uses W
   - **Normal mode:** MwbLite notices the saved file and reloads straight away.
   - **Service mode:** a UAC prompt copies it to the service's protected copy.
   - **Service mode turned on but not installed yet:** the window offers the one-time install.
-- **Close** (or Esc) closes the window; if there are changes you haven't applied, it asks whether to apply them.
-  **Cancel** discards them and closes.
+- **Apply and close** works like OK in a classic dialog: it applies your changes (as above) and closes the window;
+  if they can't be saved, the window stays open with the problem shown. **Cancel** discards your changes and closes.
+  Esc, or the window's close button, asks whether to apply changes you haven't applied.
 - **Saving rewrites settings.json.** Comments are removed (you're asked first), and the previous file is kept as
   `settings.json.bak`. Values the window doesn't show (e.g. `easyMouseFullscreenExcludedApps`) are kept.
 - **It runs as you, in its own process** (`MwbLite.exe --settings`), never as SYSTEM, in normal and service mode

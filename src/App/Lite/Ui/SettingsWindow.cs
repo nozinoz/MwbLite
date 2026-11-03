@@ -286,11 +286,11 @@ namespace MouseWithoutBorders.Lite.Ui
 
             // Footer
             var footer = new DockPanel { Margin = new Thickness(28, 10, 32, 16), LastChildFill = true };
-            // Apply saves and applies but keeps the window open; Close asks about unapplied changes; Cancel discards them.
+            // Classic OK / Cancel / Apply: "Apply and close" saves and closes; Cancel discards changes; Apply saves and stays open.
             var buttons = Kit.Horizontal(
-                Kit.Button("Apply", (_, _) => Apply(), accent: true),
-                Kit.Button("Close", (_, _) => Close()),
-                Kit.Button("Cancel", (_, _) => CancelAndClose()));
+                Kit.Button("Apply and close", (_, _) => ApplyAndClose(), accent: true),
+                Kit.Button("Cancel", (_, _) => CancelAndClose()),
+                Kit.Button("Apply", (_, _) => Apply()));
             DockPanel.SetDock(buttons, Dock.Right);
             footer.Children.Add(buttons);
             footer.Children.Add(message);
@@ -595,6 +595,18 @@ namespace MouseWithoutBorders.Lite.Ui
             SetMessage("Applied.", ok: true);
             afterSave?.Invoke(cfg);
             return true;
+        }
+
+        /// <summary>Saves and closes, like OK in a classic dialog. Stays open if the settings can't be saved.</summary>
+        private void ApplyAndClose()
+        {
+            if (HasUnsavedChanges() && !Apply())
+            {
+                return;
+            }
+
+            skipClosePrompt = true;
+            Close();
         }
 
         /// <summary>Closes without saving: unapplied changes are discarded.</summary>
