@@ -1,0 +1,8 @@
+# Template: tools/make-winget-manifest.ps1 fills in the placeholders and writes the result to out\winget\<version>.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.10.0.schema.json
+
+PackageIdentifier: nozinoz.MwbLite
+PackageVersion: __VERSION__
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.10.0

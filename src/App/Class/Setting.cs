@@ -82,6 +82,17 @@ namespace MouseWithoutBorders.Class
             }
         }
 
+        internal bool NotifyConnectionChanges
+        {
+            get
+            {
+                lock (_loadingSettingsLock)
+                {
+                    return _config.NotifyConnectionChanges;
+                }
+            }
+        }
+
         internal bool AllowInsecureConnections
         {
             get

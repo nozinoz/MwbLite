@@ -150,6 +150,7 @@ internal static class InitAndCleanup
             // MwbLite: close the sockets on suspend (peers see the PC leave) and on resume (they may look
             // connected but are dead); the helper timer reopens them straight away.
             ScheduleReopenSocketsDueToNetworkChanges();
+            Lite.LiteTray.NotePowerChange();
         }
     }
 

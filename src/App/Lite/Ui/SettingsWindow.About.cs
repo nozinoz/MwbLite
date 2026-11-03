@@ -54,8 +54,10 @@ namespace MouseWithoutBorders.Lite.Ui
                 WpfClipboard.SetText(DetailsText());
                 SetMessage("Details copied to the clipboard.", ok: true);
             });
-            copy.Margin = new Thickness(0, 12, 0, 0);
-            copy.HorizontalAlignment = HorizontalAlignment.Left;
+            copy.Margin = new Thickness(0);
+            saveDiagnosticsButton = Kit.Button("Save diagnostics…", (_, _) => _ = SaveDiagnosticsAsync());
+            var detailButtons = Kit.Horizontal(copy, saveDiagnosticsButton);
+            detailButtons.Margin = new Thickness(0, 12, 0, 0);
 
             var page = Kit.Stack(
                 Kit.PageTitle("About"),
@@ -64,7 +66,10 @@ namespace MouseWithoutBorders.Lite.Ui
                 updates,
                 Kit.Row("", "Check for updates every week", "Asks GitHub once a week whether a new version is out and shows a notification. Nothing about you or this PC is sent.", checkForUpdates),
                 Kit.Section("Details"),
-                Kit.Card(Kit.Stack(DetailsGrid(), copy)),
+                Kit.Card(Kit.Stack(
+                    DetailsGrid(),
+                    detailButtons,
+                    WithTopMargin(Kit.Hint("Save diagnostics puts the logs, status, network details and your settings (without the security key) into one zip file, to attach to a problem report. Nothing is sent anywhere."), 8))),
                 Kit.Section("Links"),
                 Kit.Card(Kit.Stack(
                     LinkRow("", "Project on GitHub", LiteUpdate.RepoUrl),
@@ -265,6 +270,55 @@ namespace MouseWithoutBorders.Lite.Ui
                 updateDetail.Text = e.Message;
                 updateProgress.Visibility = Visibility.Collapsed;
                 updateButton.IsEnabled = checkUpdateButton.IsEnabled = true;
+            }
+        }
+
+        // ---- diagnostics ----------------------------------------------------------------------------------
+
+        private async Task SaveDiagnosticsAsync()
+        {
+            if (PreviewMode)
+            {
+                return;
+            }
+
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Save diagnostics",
+                Filter = "Zip file (*.zip)|*.zip",
+                DefaultExt = ".zip",
+                AddExtension = true,
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                FileName = LiteDiagnosticsBundle.DefaultFileName(ThisPc, DateTime.Now),
+            };
+            if (dialog.ShowDialog(this) != true)
+            {
+                return;
+            }
+
+            string path = dialog.FileName;
+            LiteConfig cfg = loaded.Clone();
+            saveDiagnosticsButton.IsEnabled = false;
+            SetMessage("Collecting diagnostics… this can take up to a minute.", ok: true);
+            try
+            {
+                var notes = await Task.Run(() => LiteDiagnosticsBundle.CreateAsync(path, cfg, LiteDiagnosticsBundle.Locations.Real, CancellationToken.None));
+                SetMessage(
+                    notes.Count == 0
+                        ? "Diagnostics saved."
+                        : $"Diagnostics saved. {notes.Count} {(notes.Count == 1 ? "item" : "items")} couldn't be included; summary.txt in the zip says which.",
+                    ok: true);
+
+                // Show the file in Explorer, selected.
+                _ = Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "/select,\"" + path + "\"") { UseShellExecute = false });
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.ComponentModel.Win32Exception)
+            {
+                SetMessage("Couldn't save the diagnostics: " + e.Message, ok: false);
+            }
+            finally
+            {
+                saveDiagnosticsButton.IsEnabled = true;
             }
         }
 

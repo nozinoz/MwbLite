@@ -1,0 +1,29 @@
+# Template: tools/make-winget-manifest.ps1 fills in the placeholders and writes the result to out\winget\<version>.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+
+PackageIdentifier: nozinoz.MwbLite
+PackageVersion: __VERSION__
+InstallerType: burn
+Scope: machine
+# MwbLite-Setup.exe asks for administrator approval itself (one UAC prompt) and installs the .NET Desktop Runtime
+# first when the PC needs it, so nothing else has to be installed beforehand.
+ElevationRequirement: elevatesSelf
+# Setup upgrades an existing install in place, so winget just runs the newer Setup.
+UpgradeBehavior: install
+InstallModes:
+- interactive
+- silent
+- silentWithProgress
+ReleaseDate: __RELEASE_DATE__
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/__REPO__/releases/download/v__VERSION__/MwbLite-Setup-__VERSION__.exe
+  InstallerSha256: __SHA256__
+  AppsAndFeaturesEntries:
+  - DisplayName: MwbLite
+    Publisher: MwbLite
+    DisplayVersion: __VERSION__
+    UpgradeCode: '{D495CCAD-0937-4604-B659-4A3607355BE5}'
+    InstallerType: burn
+ManifestType: installer
+ManifestVersion: 1.10.0
