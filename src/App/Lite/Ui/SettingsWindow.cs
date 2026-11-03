@@ -382,7 +382,7 @@ namespace MouseWithoutBorders.Lite.Ui
                 Kit.Row(null, "Control all PCs", null, hkSwitchToAll),
                 Kit.Row(null, "Hide the cursor at the screen edge", null, hideMouseAtEdge),
                 Kit.Row(null, "Draw the cursor on other PCs", null, drawMouseCursor),
-                Kit.Row(null, "Move the mouse relatively", null, moveMouseRelatively),
+                Kit.Row(null, "Same mouse speed on every PC (move the mouse relatively)", "Turn on if the cursor feels slow or fast on another PC whose screen has a different resolution. Off: the cursor crosses every screen with the same hand movement as this one.", moveMouseRelatively),
                 Kit.Row(null, "Block switching at screen corners", null, blockMouseAtCorners),
                 Kit.Row(null, "No Easy Mouse over full-screen apps", null, noEasyMouseFullscreen),
                 Kit.Row(null, "Keep other PCs' screen savers off", null, blockScreenSaver),

@@ -3,6 +3,17 @@
 Each version's section is also its GitHub Release notes (see `tools/publish-release.ps1`), and Settings > About
 shows them for the latest release. Upgrade every PC to the same version.
 
+## 0.8.1
+
+- **Reconnects after sleep without re-pairing.** MwbLite used to try once on waking and then stop; if the other
+  PC was still asleep, or names didn't resolve yet, they never found each other until the settings changed. It now
+  keeps redialling every PC that isn't connected (every 15 seconds at first, then every minute), also from the
+  lock screen.
+- **Remembers where each PC was last reached** and tries those addresses when its name doesn't resolve, which is
+  common in the first minutes after waking.
+- Settings > Advanced explains **Same mouse speed on every PC (move the mouse relatively)**: turn it on if the
+  cursor feels slow on a PC whose screen resolution differs from this one's.
+
 ## 0.8.0
 
 - **About page in Settings.** Version and build details, links to the project, release notes and licences, and an

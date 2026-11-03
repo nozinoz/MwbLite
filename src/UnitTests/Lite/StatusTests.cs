@@ -124,6 +124,32 @@ public sealed class StatusTests
     }
 
     [TestMethod]
+    public void LastKnownAddressesAreKeptMostRecentFirst()
+    {
+        LiteAddressBook.SaveToDisk = false;
+        LiteAddressBook.ResetForTests();
+        LiteAddressBook.Remember("laptop", "192.168.1.21");
+        LiteAddressBook.Remember("LAPTOP", "192.168.1.22");
+        LiteAddressBook.Remember("Laptop", "192.168.1.21");
+        LiteAddressBook.Remember("laptop", "fd00::5");
+        LiteAddressBook.Remember("laptop", "10.0.0.9");
+        LiteAddressBook.Remember("laptop", "not an address");
+        LiteAddressBook.Remember("laptop", "127.0.0.1");
+
+        CollectionAssert.AreEqual(new[] { "10.0.0.9", "fd00::5", "192.168.1.21" }, LiteAddressBook.Get(" LAPTOP ").Select(a => a.ToString()).ToArray(), "most recent first, at most 3");
+        Assert.AreEqual(0, LiteAddressBook.Get("OTHER").Length);
+    }
+
+    [TestMethod]
+    public void RedialKeepsTryingQuicklyThenEveryMinute()
+    {
+        Assert.AreEqual(TimeSpan.FromSeconds(15), LiteTray.RedialDelay(1));
+        Assert.AreEqual(TimeSpan.FromSeconds(15), LiteTray.RedialDelay(7));
+        Assert.AreEqual(TimeSpan.FromMinutes(1), LiteTray.RedialDelay(8));
+        Assert.AreEqual(TimeSpan.FromMinutes(1), LiteTray.RedialDelay(10000), "never gives up");
+    }
+
+    [TestMethod]
     public void AddressListIsStableAndSkipsLoopback()
     {
         string a = LiteReconnect.CurrentAddresses();

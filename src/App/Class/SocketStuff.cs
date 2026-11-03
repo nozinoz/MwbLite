@@ -964,6 +964,14 @@ namespace MouseWithoutBorders.Class
                     Common.ShowToolTip(e.Message + ": " + machineName, 10000, ToolTipIcon.Warning, Setting.Values.ShowClipNetStatus);
 
                     Logger.Log($"{nameof(StartNewTcpClient)}.{nameof(Dns.GetHostEntry)}: {e.Message}");
+
+                    // MwbLite: right after waking, names often don't resolve yet; try where this PC was last reached.
+                    IPAddress[] known = Lite.LiteAddressBook.Get(machineName);
+                    if (known.Length > 0)
+                    {
+                        host = new IPHostEntry { HostName = machineName, AddressList = known };
+                        Logger.Log($"{nameof(StartNewTcpClient)}: trying the last known address of {machineName}: {string.Join(", ", known.Select(a => a.ToString()))}");
+                    }
                 }
 
                 UpdateTcpSockets(dummyTcp, SocketStatus.NA);

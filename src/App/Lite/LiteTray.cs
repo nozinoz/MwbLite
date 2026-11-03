@@ -273,6 +273,12 @@ namespace MouseWithoutBorders.Lite
         {
             if (Common.RunOnLogonDesktop || Common.RunOnScrSaverDesktop)
             {
+                // The lock-screen instance shows no UI, but it must keep trying to reach the other PCs too.
+                if (++timerTicks % 10 == 0)
+                {
+                    Redial(LiteStatus.Refresh(), DateTime.UtcNow);
+                }
+
                 return;
             }
 
@@ -298,6 +304,7 @@ namespace MouseWithoutBorders.Lite
                 }
 
                 StatusSnapshot status = LiteStatus.Refresh();
+                Redial(status, now);
                 string signature = status.Signature + "|" + Ui.TaskbarTheme.IsLight; // a theme change redraws the glyph
                 if (signature != lastSignature)
                 {
@@ -365,6 +372,54 @@ namespace MouseWithoutBorders.Lite
                 updateBalloonShown = true;
                 Common.ShowToolTip($"MwbLite {r.Version.ToString(3)} is available (you have {LiteUpdate.CurrentText}). Click here, or open Settings > About, to update.", 15000, ToolTipIcon.Info, true);
             }));
+        }
+
+        // ---- reconnect watchdog -------------------------------------------------------------------------------
+
+        private static DateTime nextRedial = DateTime.MinValue;
+        private static int redialAttempts;
+
+        /// <summary>
+        /// Wait before the next redial: every 15 s for the first 2 minutes, then every minute. Never gives up, so two
+        /// PCs that wake at different times (or whose network comes up late) find each other without help.
+        /// </summary>
+        internal static TimeSpan RedialDelay(int attempts) => attempts < 8 ? TimeSpan.FromSeconds(15) : TimeSpan.FromMinutes(1);
+
+        /// <summary>
+        /// Upstream MWB dials once when its sockets open and then only on a few events, so after sleep, when the
+        /// first attempt fails (the other PC still asleep, names not resolving yet), it stopped trying until the
+        /// settings changed. This redials every PC in the layout that is "not connected" (not one with an attempt
+        /// already under way), until it connects.
+        /// </summary>
+        private static void Redial(StatusSnapshot status, DateTime now)
+        {
+            if (Common.Sk == null || !status.Pcs.Any(p => p.State is PcState.NotConnected or PcState.KeyMismatch or PcState.OlderVersion))
+            {
+                redialAttempts = 0;
+                nextRedial = now + TimeSpan.FromSeconds(5); // a fresh disconnect waits 5 s before the first redial
+                return;
+            }
+
+            if (now < nextRedial || status.Pcs.Any(p => p.State == PcState.Connecting))
+            {
+                return;
+            }
+
+            redialAttempts++;
+            nextRedial = now + RedialDelay(redialAttempts);
+            if (SocketStuff.InvalidKeyFound)
+            {
+                // Upstream stops all dialling after one "invalid key" until the settings change; a wrong key is now
+                // caught (and shown) by the secure channel, so let the retries continue.
+                SocketStuff.InvalidKeyFound = false;
+            }
+
+            if (redialAttempts == 1 || redialAttempts % 10 == 0)
+            {
+                LiteLog.Write(nameof(LiteTray), $"Redialling {string.Join(", ", status.Pcs.Where(p => p.State is PcState.NotConnected or PcState.KeyMismatch or PcState.OlderVersion).Select(p => p.Name))} (attempt {redialAttempts}).");
+            }
+
+            MachineStuff.UpdateClientSockets("LiteRedial");
         }
 
         private static void WriteStatus(StatusSnapshot status, DateTime now)

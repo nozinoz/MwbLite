@@ -416,8 +416,17 @@ those connections then have only upstream's protection.
 
 **Staying connected.** MwbLite reconnects by itself when a PC wakes from sleep, when its network changes (new
 Wi-Fi, new IP address, a cable plugged in) and when a peer vanishes. Each connection uses TCP keepalive, so a PC
-that went to sleep or lost its network is noticed in about 20 seconds; upstream could take many minutes. The
-manual **Reconnect** hotkey (Win+Ctrl+Alt+R) still works.
+that went to sleep or lost its network is noticed in about 20 seconds; upstream could take many minutes. While a
+PC in the layout isn't connected, MwbLite keeps redialling it (every 15 seconds at first, then every minute, also
+from the lock screen), so PCs that wake at different times find each other without help. It also remembers the
+address each PC was last reached at (`addresses.json` next to settings.json) and tries it when the name doesn't
+resolve, as often happens in the first minutes after waking. The manual **Reconnect** hotkey (Win+Ctrl+Alt+R)
+still works.
+
+**Mouse speed on PCs with a different screen.** By default the cursor's position is sent as a fraction of the
+screen, so crossing another PC's screen takes the same hand movement as crossing this one's: on a laptop with a
+lower resolution than a 4K desktop it feels slow. Turn on **Same mouse speed on every PC** (Settings > Advanced)
+on the PC whose mouse you use: then the movement itself is sent, and each PC moves its pointer at its own speed.
 
 **Layout** (machine order, one row or two, wrap) is shared. A change made in Settings on one PC is sent to the
 connected PCs, and each saves it to its own settings.json. MwbLite also pre-loads the configured names into MWB's

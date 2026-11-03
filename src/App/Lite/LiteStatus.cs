@@ -153,6 +153,11 @@ namespace MouseWithoutBorders.Lite
                 }).ToList(),
             };
             Current = snapshot;
+            foreach (PcStatus pc in snapshot.Pcs.Where(p => p.State == PcState.Connected && p.Address != null))
+            {
+                LiteAddressBook.Remember(pc.Name, pc.Address); // for reconnecting when names don't resolve after sleep
+            }
+
             return snapshot;
         }
 
