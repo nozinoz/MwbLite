@@ -2,7 +2,8 @@
 // UpdateTests); this file only wires them to GitHub, the update task and the control channel (LiteControl).
 //
 // Automatic updates (installUpdatesAutomatically): LiteUpdate's weekly check starts the update task when it finds a
-// newer release; ShouldInstallAutomatically is its rule.
+// newer release that is signed with the release key; ShouldInstallAutomatically is its rule. The same goes for updates
+// started by a peer: the update task checks the signature itself, and a release that isn't signed is only announced.
 //
 // Update together (updateWithOtherPcs, on by default). PCs must run the same version to connect, so:
 // - When this PC says hello to a connected PC that runs an older MwbLite, it sends "update-available" with its own
@@ -10,7 +11,7 @@
 // - When this PC receives "update-available" (OnUpdateAvailable) for a version newer than its own, it does NOT trust
 //   the sender for anything but the version number: it asks GitHub itself whether a release at least that new is
 //   published, and only then starts the normal update (the same task, downloading the newest release from GitHub and
-//   checking it against GitHub's SHA-256). Nothing the other PC names is ever downloaded or run. Without the update
+//   checking it against the signed SHA256SUMS.txt). Nothing the other PC names is ever downloaded or run. Without the update
 //   task (not installed with Setup) it only shows a notification that points at Settings > About.
 // Both sides are rate limited. The sender spends its hourly slot for a PC only when that PC answered (it retries after
 // a few minutes otherwise). The receiver acts on one announcement per hour, whichever PC or version it names, and
@@ -251,7 +252,13 @@ namespace MouseWithoutBorders.Lite
                     TriedVersions.Record(announced.ToString(3), DateTime.UtcNow);
                 }
 
-                if (action == PeerUpdateAction.UpdateNow && LiteUpdate.TryStartElevatedUpdate())
+                string unsigned = action == PeerUpdateAction.Ignore ? null : await LiteUpdate.CheckSignatureAsync(latest, cts.Token).ConfigureAwait(false);
+                if (unsigned != null)
+                {
+                    LiteLog.Write(nameof(LiteAutoUpdate), $"Not updating to {latest.Version.ToString(3)}: {unsigned}");
+                    LiteTray.NotifyUpdate($"{from} runs MwbLite {announced.ToString(3)}, but that release isn't signed with MwbLite's release key, so it won't be installed automatically. Open Settings > About.");
+                }
+                else if (action == PeerUpdateAction.UpdateNow && LiteUpdate.TryStartElevatedUpdate())
                 {
                     LiteTray.NotifyUpdate($"Updating MwbLite to {latest.Version.ToString(3)}… ({from} already runs it.)");
                 }

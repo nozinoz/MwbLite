@@ -31,6 +31,10 @@ shows them for the latest release. Upgrade every PC to the same version.
 - **Update together with my other PCs** (on by default): when a connected PC runs an older MwbLite, this one tells
   it, and it updates itself. The other PC never downloads anything from the sender; it installs the latest GitHub
   release only.
+- **Signed releases.** Updates are installed only if the release's `SHA256SUMS.txt` is signed with MwbLite's release
+  key (the new `SHA256SUMS.txt.sig`), so a release published from a hijacked GitHub account isn't installed by any
+  update path. Without a good signature MwbLite says "This release isn't signed with MwbLite's release key; not
+  installing it." and the weekly check says the release can't be installed automatically.
 - **Smaller portable exes**: about 74 MB each instead of 178 MB, at the cost of more memory and a slightly slower
   start. The installed version is unchanged.
 - The new update features take effect from the release after 0.9.0. Installing 0.9.0 itself still uses the old

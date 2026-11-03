@@ -38,7 +38,7 @@ Output in `dist\`:
 | `MwbLite-Setup-<version>.exe` | ~8 MB | **The installer.** Double-click it on each PC. Installs the .NET Desktop Runtime first if the PC needs it. |
 | `MwbLite-<version>-x64.msi` | ~7 MB | The app package alone, for silent or scripted installs on PCs that already have the .NET 10 Desktop Runtime: `msiexec /i MwbLite-<version>-x64.msi /qn` |
 | `portable\MwbLite.exe`, `portable\MwbLite.Helper.exe` | ~74 MB each | Run without installing (see [Portable use](#portable-use-no-installer)). |
-| `SHA256SUMS.txt` | | Hashes of all of the above. |
+| `SHA256SUMS.txt`, `SHA256SUMS.txt.sig` | | Hashes of Setup and the MSI, and the maintainer's signature of that list (see [Signed releases](#signed-releases)). |
 
 Artwork and screenshots are generated from code, so they stay consistent:
 
@@ -642,8 +642,9 @@ Upstream already hard-coded `DisableCAD`, `HideLogonLogo`, `MyKeyDaysToExpire`, 
   announcements) travel over `tcpPort+3` with the same TLS and security-key proof as MWB's connections, with no
   fallback. Anyone with the key could already control the PCs; it adds that they can lock or sleep them.
 - **The update task** runs `MwbLite.exe` from `C:\Program Files\MwbLite` as SYSTEM, and is only registered for that
-  copy. It takes no input from the user who starts it, installs only what GitHub publishes as the latest release,
-  and verifies the download's SHA-256 on the handle it then runs. A PC that is told about a newer version by another
+  copy. It takes no input from the user who starts it, installs only the latest GitHub release whose checksum list is
+  signed with the release key (see [Signed releases](#signed-releases)), and verifies the download's SHA-256 on the
+  handle it then runs. A PC that is told about a newer version by another
   PC does not trust that PC for anything but the version number.
 - **Outbound calls:** only to the MWB peers you configure, plus a weekly update check (one HTTPS request to
   GitHub's API for the latest release; nothing about you or the PC is sent beyond a `MwbLite/<version>` user
@@ -694,14 +695,15 @@ and third-party notices. **Copy details** puts all of it on the clipboard, handy
 
 **Update check.** About shows whether you're up to date. Once a week (switch: **Check for updates every week**)
 MwbLite asks GitHub for the latest release; if it's newer, a notification says so, and clicking it opens About.
-**Update now** downloads that release's `MwbLite-Setup-<version>.exe` over HTTPS, checks its size and SHA-256
-against the digest GitHub publishes for it (or the release's `SHA256SUMS.txt`), and installs it, keeping your
-settings. Every PC must run the same version.
+**Update now** downloads that release's `MwbLite-Setup-<version>.exe` over HTTPS, checks it against the release's
+signed `SHA256SUMS.txt` (see [Signed releases](#signed-releases)), and installs it, keeping your settings.
+Every PC must run the same version.
 
 **With Setup: no UAC prompt (0.9.0 and later).** Setup adds an on-demand scheduled task, **MwbLite Update**, that
 runs `MwbLite.exe --install-update` as SYSTEM. Only SYSTEM and Administrators can change it, but any signed-in user
 can start it, and it takes no input from whoever starts it: all it does is install the newest release published on
-GitHub, after checking the download against the SHA-256 GitHub reports for it. **Update now** starts that task, MwbLite
+GitHub that is signed with the release key, after checking the download against the SHA-256 in the signed list.
+**Update now** starts that task, MwbLite
 restarts as you, unelevated, and there is no administrator prompt. The task:
 
 - downloads Setup to `%ProgramData%\MwbLite\update`, a folder only SYSTEM and Administrators can write, then locks the
@@ -714,6 +716,39 @@ A copy that wasn't installed with Setup (portable, or `--install`) has no task; 
 to your temp folder and runs it, with the usual UAC prompt. Setup creates the task on install and upgrade and removes
 it on uninstall. Installing 0.9.0 itself still uses the old flow, so the task is first used for the release after
 0.9.0.
+
+### Signed releases
+
+Anyone who controls the GitHub account could publish a release, so a release is not trusted just because it is on
+GitHub. Every release carries `SHA256SUMS.txt` (the SHA-256 of Setup and the MSI) and `SHA256SUMS.txt.sig`, a
+signature of that file (ECDSA P-256 with SHA-256, base64) made with a release key whose private half exists only on the
+maintainer's PC. The public half is built into MwbLite (`src/App/Lite/LiteReleaseKey.cs`). Before anything is
+installed, by **Update now**, `--install-update`, an automatic update or an update started by another PC, MwbLite
+downloads both files (only from `https://github.com/nozinoz/MwbLite/releases/download/`), checks the signature, and
+takes the SHA-256 that Setup must have from the signed list, never from the digest GitHub's API reports; the download
+is then checked against it. A release with no signature, or a bad one, is refused: "This release isn't signed with
+MwbLite's release key; not installing it." The weekly check still tells you that such a release exists, but says it
+can't be installed automatically, and **Update now** isn't offered. There is no fallback to an unsigned checksum.
+(You can still install a release by hand from the web page if you trust it; Setup itself is not code-signed.)
+
+**Maintainers:** the key is made once and must be kept.
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\release-key.ps1 -New
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\release-key.ps1 -Backup D:\somewhere-safe\mwblite-release-key.pem
+```
+
+`-New` creates the key (it refuses if one exists), stores the private key encrypted with Windows DPAPI for your
+account in `%USERPROFILE%\.mwblite-release\release-key.dpapi` (useless on another PC or for another user), and writes the
+public key into `LiteReleaseKey.cs`: commit that and build the release from it. `-Backup` asks for a passphrase
+twice and writes the private key as a PKCS#8 PEM encrypted with it (AES-256, PBKDF2 with 600,000 rounds); keep that file
+and the passphrase apart and off this PC. `-Restore <file>` puts a backup back on a new PC. `publish-release.ps1`
+signs `SHA256SUMS.txt` with `release-key.ps1 -Sign` and uploads the signature, and stops before creating the release
+if that fails, including when the key doesn't match the public key in the source. **Losing the key (and its backup)
+means installed copies can never update themselves again:** everyone installs the next version by hand once, and that
+version carries a new key. Run `-New` before building the first release that contains this check: that build carries
+the public key, and every update after it must be signed. While `LiteReleaseKey.cs` still has its placeholder, a
+build installs no update at all.
 
 **Install updates automatically** (About; off by default, `installUpdatesAutomatically`). When the weekly check finds
 a newer release, MwbLite starts the update task by itself and a notification says it is updating and will restart. It
@@ -740,8 +775,8 @@ still saved. Nothing is sent anywhere; look through the zip before attaching it 
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\publish-release.ps1
 ```
 
-It creates the GitHub Release `v<version>` with Setup, the MSI and `SHA256SUMS.txt`, using the changelog section
-as its notes. Installed copies see it at their next check. To publish it to winget as well, see
+It signs `SHA256SUMS.txt` (see [Signed releases](#signed-releases)) and creates the GitHub Release `v<version>` with
+Setup, the MSI, `SHA256SUMS.txt` and `SHA256SUMS.txt.sig`, using the changelog section as its notes. Installed copies see it at their next check. To publish it to winget as well, see
 [packaging/winget/README.md](packaging/winget/README.md) (winget, not yet submitted).
 
 ## Sharing MwbLite with other people

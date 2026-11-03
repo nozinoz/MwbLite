@@ -371,7 +371,9 @@ namespace MouseWithoutBorders.Lite
             LiteUpdate.MaybeCheckInBackground(
                 Setting.Values.CheckForUpdates,
                 Setting.Values.InstallUpdatesAutomatically,
-                r => NotifyUpdate($"MwbLite {r.Version.ToString(3)} is available (you have {LiteUpdate.CurrentText}). Click here, or open Settings > About, to update."),
+                (r, signed) => NotifyUpdate(signed
+                    ? $"MwbLite {r.Version.ToString(3)} is available (you have {LiteUpdate.CurrentText}). Click here, or open Settings > About, to update."
+                    : $"MwbLite {r.Version.ToString(3)} is available, but it isn't signed with MwbLite's release key, so it can't be installed automatically. Click here for details."),
                 r => NotifyUpdate($"Updating MwbLite to {r.Version.ToString(3)}… MwbLite will restart."));
         }
 

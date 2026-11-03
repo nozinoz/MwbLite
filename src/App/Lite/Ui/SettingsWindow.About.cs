@@ -1,7 +1,8 @@
 // MwbLite Settings > About: version and build details, links to the project, the update status (from the
 // project's GitHub Releases) with release notes, and Update. When Setup installed MwbLite, Update starts the
 // "MwbLite Update" scheduled task, which installs the new version as SYSTEM with no prompt; otherwise it downloads and
-// verifies the new Setup and runs it (UAC). Also the switches for the weekly check, installing updates automatically
+// verifies the new Setup and runs it (UAC). Either way the release must be signed with MwbLite's release key (see
+// LiteReleaseKey): a newer release that isn't signed is shown, but has no Update button. Also the switches for the weekly check, installing updates automatically
 // and updating together with the other PCs.
 using System;
 using System.Diagnostics;
@@ -211,12 +212,15 @@ namespace MouseWithoutBorders.Lite.Ui
                 }
                 else if (LiteUpdate.IsNewer(r))
                 {
+                    // Only a release signed with the release key can be installed; say so before offering it.
+                    string unsigned = r.SetupUrl == null ? null : await LiteUpdate.CheckSignatureAsync(r, updateCts.Token);
                     updateStatus.Text = $"Version {r.Version.ToString(3)} is available";
                     updateDetail.Text = $"You have {LiteUpdate.CurrentText}. Released {r.PublishedUtc.ToLocalTime().ToString("d MMMM yyyy", CultureInfo.CurrentCulture)}."
                         + (r.SetupUrl == null ? " This release has no Setup to download; get it from the release page."
+                            : unsigned != null ? " MwbLite can't install it: " + unsigned
                             : LiteUpdate.CanUpdateWithoutPrompt() ? " Update downloads Setup from GitHub, checks it, installs it and restarts MwbLite, with no administrator prompt."
                             : " Update downloads Setup from GitHub, checks it, and installs it (one UAC prompt).");
-                    updateButton.Visibility = r.SetupUrl == null ? Visibility.Collapsed : Visibility.Visible;
+                    updateButton.Visibility = r.SetupUrl == null || unsigned != null ? Visibility.Collapsed : Visibility.Visible;
                 }
                 else
                 {
@@ -234,7 +238,7 @@ namespace MouseWithoutBorders.Lite.Ui
             catch (OperationCanceledException)
             {
             }
-            catch (Exception e) when (e is System.Net.Http.HttpRequestException or System.Text.Json.JsonException or IOException)
+            catch (Exception e) when (e is System.Net.Http.HttpRequestException or System.Text.Json.JsonException or IOException or InvalidDataException)
             {
                 updateStatus.Text = "Couldn't check for updates";
                 updateDetail.Text = (userAsked ? "Check your internet connection and try again. " : string.Empty) + "(" + e.Message + ")";
