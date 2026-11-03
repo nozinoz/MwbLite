@@ -276,7 +276,9 @@ namespace MouseWithoutBorders.Lite
                 // The lock-screen instance shows no UI, but it must keep trying to reach the other PCs too.
                 if (++timerTicks % 10 == 0)
                 {
-                    Redial(LiteStatus.Refresh(), DateTime.UtcNow);
+                    StatusSnapshot logonStatus = LiteStatus.Refresh();
+                    Redial(logonStatus, DateTime.UtcNow);
+                    MaintainControlChannel(logonStatus);
                 }
 
                 return;
@@ -305,6 +307,7 @@ namespace MouseWithoutBorders.Lite
 
                 StatusSnapshot status = LiteStatus.Refresh();
                 Redial(status, now);
+                MaintainControlChannel(status);
                 string signature = status.Signature + "|" + Ui.TaskbarTheme.IsLight; // a theme change redraws the glyph
                 if (signature != lastSignature)
                 {
@@ -378,6 +381,19 @@ namespace MouseWithoutBorders.Lite
 
         private static DateTime nextRedial = DateTime.MinValue;
         private static int redialAttempts;
+        private static DateTime fastRedialUntil = DateTime.MinValue;
+        private static TimeSpan fastRedialEvery;
+
+        /// <summary>
+        /// After Wake-on-LAN: redial missing PCs every <paramref name="every"/> for <paramref name="duration"/>, starting
+        /// at once, instead of the slow schedule, so the woken PC connects as soon as it is up.
+        /// </summary>
+        internal static void RedialSoon(TimeSpan duration, TimeSpan every)
+        {
+            fastRedialEvery = every;
+            fastRedialUntil = DateTime.UtcNow + duration;
+            nextRedial = DateTime.MinValue;
+        }
 
         /// <summary>
         /// Wait before the next redial: every 15 s for the first 2 minutes, then every minute. Never gives up, so two
@@ -406,7 +422,7 @@ namespace MouseWithoutBorders.Lite
             }
 
             redialAttempts++;
-            nextRedial = now + RedialDelay(redialAttempts);
+            nextRedial = now + (now < fastRedialUntil ? fastRedialEvery : RedialDelay(redialAttempts));
             if (SocketStuff.InvalidKeyFound)
             {
                 // Upstream stops all dialling after one "invalid key" until the settings change; a wrong key is now
@@ -420,6 +436,73 @@ namespace MouseWithoutBorders.Lite
             }
 
             MachineStuff.UpdateClientSockets("LiteRedial");
+        }
+
+        // ---- control channel (LiteControl) ---------------------------------------------------------------------
+
+        private static readonly HashSet<string> HelloSent = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Once a second: listen on the control port while this instance's desktop is the active one (it then owns
+        /// MWB's sockets; service mode has one SYSTEM instance per desktop), and say hello to each PC that has just
+        /// connected, once per connection, in the background.
+        /// </summary>
+        private static void MaintainControlChannel(StatusSnapshot status)
+        {
+            try
+            {
+                bool owner = InitAndCleanup.InitDone && WinAPI.IsMyDesktopActive() && Common.CurrentProcess.SessionId == NativeMethods.WTSGetActiveConsoleSessionId();
+                LiteControl.Maintain(owner);
+                if (!owner)
+                {
+                    return;
+                }
+
+                var connected = status.Pcs.Where(p => p.State == PcState.Connected).ToList();
+                lock (HelloSent)
+                {
+                    _ = HelloSent.RemoveWhere(n => !connected.Any(p => p.Name.Equals(n, StringComparison.OrdinalIgnoreCase)));
+                    foreach (PcStatus pc in connected.Where(p => HelloSent.Add(p.Name)))
+                    {
+                        string name = pc.Name, address = pc.Address;
+                        _ = System.Threading.Tasks.Task.Run(() => SayHelloAsync(name, address));
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                LiteLog.Write(nameof(LiteTray), "Control channel maintenance failed: " + e.Message);
+            }
+        }
+
+        // The other PC's control listener may start a second after its MWB sockets do (and older versions never
+        // listen), so try a few times. Its answer teaches Wake its MACs (LiteControl.HelloAsync); without one, ask ARP.
+        private static async System.Threading.Tasks.Task SayHelloAsync(string pc, string address)
+        {
+            try
+            {
+                PeerInfo info = null;
+                for (int attempt = 0; attempt < 3 && info == null; attempt++)
+                {
+                    if (attempt > 0)
+                    {
+                        await System.Threading.Tasks.Task.Delay(4000).ConfigureAwait(false);
+                    }
+
+                    using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    info = await LiteControl.HelloAsync(pc, cts.Token).ConfigureAwait(false);
+                }
+
+                if (info == null || info.Macs.Count == 0)
+                {
+                    _ = System.Net.IPAddress.TryParse(address, out System.Net.IPAddress ip);
+                    await LiteWake.LearnFromArpAsync(pc, ip).ConfigureAwait(false);
+                }
+            }
+            catch (Exception e)
+            {
+                LiteLog.Write(nameof(LiteTray), $"Saying hello to {pc} failed: {e.Message}");
+            }
         }
 
         private static void WriteStatus(StatusSnapshot status, DateTime now)

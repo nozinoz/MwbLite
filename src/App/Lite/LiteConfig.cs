@@ -274,9 +274,9 @@ namespace MouseWithoutBorders.Lite
                 warnings.Add($"machines does not include this computer ({NormalizeName(Environment.MachineName)}); MWB will place it in the first empty slot.");
             }
 
-            if (Advanced.TcpPort is < 1024 or > 65534)
+            if (Advanced.TcpPort is < 1024 or > 65532)
             {
-                errors.Add("advanced.tcpPort must be between 1024 and 65534 (MWB also uses tcpPort+1).");
+                errors.Add("advanced.tcpPort must be between 1024 and 65532 (MwbLite also uses tcpPort+1 and tcpPort+3).");
             }
 
             foreach (var (name, value) in HotkeyStrings())

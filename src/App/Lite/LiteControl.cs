@@ -5,13 +5,32 @@
 // like MWB's connections: TLS with the PC's own certificate, then the security-key proof (LiteSecureChannel), with
 // no fallback to an unprotected protocol. Older MwbLite versions don't listen there; callers treat that as "no answer".
 //
-// Wire format inside TLS: each message is a 4-byte little-endian length followed by that many bytes of UTF-8 JSON.
-// The client sends one request {"op": "...", ...}, the server answers one reply {"ok": true|false, ...} and closes.
+// Wire format inside TLS: each message is a 4-byte little-endian length followed by that many bytes of UTF-8 JSON
+// (at most 64 KB). The client sends one request {"op": "...", ...}, the server answers one reply {"ok": true|false, ...}
+// and closes. An unknown op gets {"ok": false, "error": "unknown op"}.
+//
+// Which engine instance listens: the one that owns MWB's sockets, i.e. the instance whose desktop is the active one
+// (in service mode there are several SYSTEM instances, one per desktop, and MWB moves its sockets between them).
+// LiteTray.OnTimer calls Maintain() every second: it binds when this instance should listen, retries a failed bind
+// every 30 s (quietly: one log line per streak), and stops when the desktop goes away. The Settings window and the
+// helper never start it. Binding mirrors MWB's own listener (TcpListener.Create: dual-stack IPv6/IPv4 where available).
 using System;
+using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+
+using MouseWithoutBorders.Class;
+using MouseWithoutBorders.Core;
 
 namespace MouseWithoutBorders.Lite
 {
@@ -28,26 +47,455 @@ namespace MouseWithoutBorders.Lite
     {
         internal const int PortOffset = 3;
 
+        /// <summary>The largest request or reply, in bytes of JSON.</summary>
+        internal const int MaxMessageBytes = 64 * 1024;
+
+        private static readonly TimeSpan Overall = TimeSpan.FromSeconds(10);
+        private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan DnsTimeout = TimeSpan.FromSeconds(3);
+        private static readonly TimeSpan BindRetry = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan LogEvery = TimeSpan.FromMinutes(10);
+        private const int MaxConcurrent = 16;
+
+        private static readonly Lock Gate = new();
+        private static readonly ConcurrentDictionary<string, Func<JsonObject, JsonObject>> Handlers = new(StringComparer.Ordinal);
+        private static readonly ConcurrentDictionary<string, DateTime> LastLogged = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly SemaphoreSlim Slots = new(MaxConcurrent, MaxConcurrent);
+
+        private static TcpListener listener;
+        private static CancellationTokenSource stopListening;
+        private static DateTime nextBind = DateTime.MinValue;
+        private static bool bindFailureLogged;
+
+        static LiteControl()
+        {
+            RegisterHandler("hello", _ => HelloReply());
+            LitePower.RegisterHandlers();
+        }
+
         internal static int PortFor(int tcpPort) => tcpPort + PortOffset;
 
-        /// <summary>Starts listening (idempotent). Called once by the engine at startup.</summary>
-        internal static void Start() => throw new NotImplementedException();
+        /// <summary>The port to listen on and to dial (tests point it at a loopback listener).</summary>
+        internal static Func<int> PortProvider { get; set; } = () => PortFor(Common.tcpPort > 0 ? Common.tcpPort : Setting.Values.TcpPort);
 
-        /// <summary>Stops listening (engine exit).</summary>
-        internal static void Stop() => throw new NotImplementedException();
+        /// <summary>The port actually bound, or 0 when not listening.</summary>
+        internal static int ListeningPort => (listener?.LocalEndpoint as IPEndPoint)?.Port ?? 0;
+
+        internal static bool IsListening => listener != null;
+
+        // ---- listening ------------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// Called every second by the engine (LiteTray.OnTimer): listens while this instance owns MWB's sockets,
+        /// stops when it doesn't, and retries a failed bind later.
+        /// </summary>
+        internal static void Maintain(bool shouldListen)
+        {
+            if (shouldListen)
+            {
+                if (!IsListening && DateTime.UtcNow >= nextBind)
+                {
+                    Start();
+                }
+            }
+            else if (IsListening)
+            {
+                Stop();
+            }
+        }
+
+        /// <summary>Starts listening (idempotent). A failed bind is logged and retried by <see cref="Maintain"/>; it never throws.</summary>
+        internal static void Start()
+        {
+            lock (Gate)
+            {
+                if (listener != null)
+                {
+                    return;
+                }
+
+                int port = 0;
+                try
+                {
+                    port = PortProvider();
+                    var l = TcpListener.Create(port); // dual-stack IPv6/IPv4 where available, like MWB's own listener
+                    l.Start();
+                    listener = l;
+                    stopListening = new CancellationTokenSource();
+                    _ = Task.Run(() => AcceptLoop(l, stopListening.Token));
+                    bindFailureLogged = false;
+                    LiteLog.Write(nameof(LiteControl), "Control channel listening on port " + ListeningPort + ".");
+                }
+                catch (Exception e) when (e is SocketException or InvalidOperationException or ArgumentOutOfRangeException or ObjectDisposedException)
+                {
+                    nextBind = DateTime.UtcNow + BindRetry;
+                    if (!bindFailureLogged)
+                    {
+                        bindFailureLogged = true;
+                        LiteLog.Write(nameof(LiteControl), $"Could not listen on port {port}: {e.Message}. Will retry every {BindRetry.TotalSeconds:0} s.");
+                    }
+                }
+            }
+        }
+
+        /// <summary>Stops listening (engine exit, or this instance's desktop went away).</summary>
+        internal static void Stop()
+        {
+            lock (Gate)
+            {
+                if (listener == null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    stopListening?.Cancel();
+                    listener.Stop();
+                }
+                catch (Exception e) when (e is SocketException or ObjectDisposedException)
+                {
+                }
+
+                listener = null;
+                stopListening = null;
+                LiteLog.Write(nameof(LiteControl), "Control channel stopped.");
+            }
+        }
+
+        private static async Task AcceptLoop(TcpListener l, CancellationToken stop)
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                Socket socket;
+                try
+                {
+                    socket = await l.AcceptSocketAsync(stop).ConfigureAwait(false);
+                }
+                catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException)
+                {
+                    return;
+                }
+                catch (SocketException)
+                {
+                    if (stop.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    await Task.Delay(500).ConfigureAwait(false); // e.g. a connection reset before accept: just go on
+                    continue;
+                }
+
+                if (!Slots.Wait(0))
+                {
+                    socket.Dispose(); // too many at once: drop
+                    continue;
+                }
+
+                _ = Task.Run(() =>
+                {
+                    try
+                    {
+                        Serve(socket);
+                    }
+                    finally
+                    {
+                        _ = Slots.Release();
+                    }
+                });
+            }
+        }
+
+        // One connection: secure it, read one request, answer, close. Everything is bounded by Overall.
+        private static void Serve(Socket socket)
+        {
+            using (socket)
+            {
+                using var deadline = new CancellationTokenSource(Overall);
+                using CancellationTokenRegistration reg = deadline.Token.Register(() => CloseQuietly(socket));
+                string remote = null;
+                try
+                {
+                    remote = LiteStatus.Display((socket.RemoteEndPoint as IPEndPoint)?.Address);
+                    string key = LiteSecureChannel.SecurityKey();
+                    if (string.IsNullOrEmpty(key))
+                    {
+                        return; // not paired yet: nobody can prove a key we don't have
+                    }
+
+                    socket.NoDelay = true;
+                    using Stream stream = LiteSecureChannel.EstablishStrict(socket, isClient: false, key);
+                    socket.ReceiveTimeout = socket.SendTimeout = (int)Overall.TotalMilliseconds;
+                    JsonObject request = ReadMessage(stream);
+                    WriteMessage(stream, Dispatch(request));
+                }
+                catch (Exception e) when (e is IOException or InvalidDataException or SocketException or ObjectDisposedException or System.Security.Authentication.AuthenticationException or KeyMismatchException)
+                {
+                    // A wrong key, a port scan, a timeout: nothing to tell the other side. Logged rarely.
+                    LogQuietly("serve-" + remote, $"Control connection from {remote} ended: {e.Message}");
+                }
+                catch (Exception e)
+                {
+                    LiteLog.Write(nameof(LiteControl), $"Control connection from {remote} failed: {e}");
+                }
+            }
+        }
+
+        /// <summary>Runs the handler for a request and builds the reply. Never throws.</summary>
+        internal static JsonObject Dispatch(JsonObject request)
+        {
+            string op = null;
+            try
+            {
+                op = request["op"]?.GetValue<string>();
+            }
+            catch (Exception e) when (e is InvalidOperationException or FormatException)
+            {
+            }
+
+            if (op == null || !Handlers.TryGetValue(op, out Func<JsonObject, JsonObject> handler))
+            {
+                return new JsonObject { ["ok"] = false, ["error"] = "unknown op" };
+            }
+
+            try
+            {
+                var reply = new JsonObject { ["ok"] = true };
+                JsonObject extra = handler(request);
+                if (extra != null)
+                {
+                    foreach (KeyValuePair<string, JsonNode> field in extra.Where(f => f.Key != "ok"))
+                    {
+                        reply[field.Key] = field.Value?.DeepClone();
+                    }
+                }
+
+                return reply;
+            }
+            catch (Exception e)
+            {
+                return new JsonObject { ["ok"] = false, ["error"] = e.Message };
+            }
+        }
 
         /// <summary>
         /// Registers the handler for one request type. The handler gets the request and returns the reply's extra
         /// fields (null for a bare {"ok": true}); throwing gives {"ok": false, "error": message}.
         /// Handlers run on a worker thread.
         /// </summary>
-        internal static void RegisterHandler(string op, Func<JsonObject, JsonObject> handler) => throw new NotImplementedException();
+        internal static void RegisterHandler(string op, Func<JsonObject, JsonObject> handler) => Handlers[op] = handler;
+
+        // ---- framing --------------------------------------------------------------------------------------------
+
+        internal static void WriteMessage(Stream stream, JsonObject message)
+        {
+            byte[] body = Encoding.UTF8.GetBytes(message.ToJsonString());
+            if (body.Length > MaxMessageBytes)
+            {
+                throw new InvalidDataException($"The message is {body.Length} bytes; the limit is {MaxMessageBytes}.");
+            }
+
+            byte[] frame = new byte[4 + body.Length]; // one write, so it goes out as one TLS record
+            BinaryPrimitives.WriteInt32LittleEndian(frame, body.Length);
+            body.CopyTo(frame, 4);
+            stream.Write(frame);
+            stream.Flush();
+        }
+
+        /// <summary>Reads one message. Throws InvalidDataException for a length over the limit or text that isn't a JSON object.</summary>
+        internal static JsonObject ReadMessage(Stream stream)
+        {
+            byte[] head = new byte[4];
+            stream.ReadExactly(head);
+            int length = BinaryPrimitives.ReadInt32LittleEndian(head);
+            if (length is < 0 or > MaxMessageBytes)
+            {
+                throw new InvalidDataException($"The message length {length} is outside 0..{MaxMessageBytes}.");
+            }
+
+            byte[] body = new byte[length];
+            stream.ReadExactly(body);
+            try
+            {
+                return JsonNode.Parse(body) as JsonObject ?? throw new InvalidDataException("The message is not a JSON object.");
+            }
+            catch (JsonException e)
+            {
+                throw new InvalidDataException("The message is not valid JSON: " + e.Message, e);
+            }
+        }
+
+        // ---- sending --------------------------------------------------------------------------------------------
 
         /// <summary>
         /// Sends one request to a PC by name (resolved like MWB does, with LiteAddressBook as fallback) and returns the
         /// reply, or null if the PC didn't answer (offline, older MwbLite, wrong key, timeout).
         /// </summary>
-        internal static Task<JsonObject> SendAsync(string peer, string op, JsonObject args, CancellationToken ct) => throw new NotImplementedException();
+        internal static async Task<JsonObject> SendAsync(string peer, string op, JsonObject args, CancellationToken ct)
+        {
+            try
+            {
+                string key = LiteSecureChannel.SecurityKey();
+                if (string.IsNullOrEmpty(key) || string.IsNullOrWhiteSpace(peer))
+                {
+                    return null;
+                }
+
+                JsonObject request = args == null ? new JsonObject() : (JsonObject)args.DeepClone();
+                request["op"] = op;
+
+                IPAddress[] candidates = await ResolveAsync(peer.Trim(), ct).ConfigureAwait(false);
+                if (candidates.Length == 0)
+                {
+                    LogQuietly("resolve-" + peer, $"Control channel: can't find {peer} on the network.");
+                    return null;
+                }
+
+                using Socket socket = await ConnectAsync(candidates, PortProvider(), ct).ConfigureAwait(false);
+                if (socket == null)
+                {
+                    LogQuietly("connect-" + peer, $"Control channel: {peer} ({string.Join(", ", candidates.Select(a => a.ToString()))}) didn't answer on port {PortProvider()}; it may be off or run an older MwbLite.");
+                    return null;
+                }
+
+                return await Task.Run(() => Exchange(socket, key, request, ct), CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
+            catch (Exception e)
+            {
+                LogQuietly("send-" + peer, $"Control channel to {peer} failed: {e.Message}");
+                return null;
+            }
+        }
+
+        // The client's whole conversation on a connected socket, bounded by Overall (and the caller's token).
+        private static JsonObject Exchange(Socket socket, string key, JsonObject request, CancellationToken ct)
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            deadline.CancelAfter(Overall);
+            using CancellationTokenRegistration reg = deadline.Token.Register(() => CloseQuietly(socket));
+            string peer = LiteStatus.Display((socket.RemoteEndPoint as IPEndPoint)?.Address);
+            try
+            {
+                socket.NoDelay = true;
+                using Stream stream = LiteSecureChannel.EstablishStrict(socket, isClient: true, key);
+                socket.ReceiveTimeout = socket.SendTimeout = (int)Overall.TotalMilliseconds;
+                WriteMessage(stream, request);
+                return ReadMessage(stream);
+            }
+            catch (Exception e) when (e is IOException or InvalidDataException or SocketException or ObjectDisposedException or System.Security.Authentication.AuthenticationException or KeyMismatchException)
+            {
+                if (!ct.IsCancellationRequested)
+                {
+                    LogQuietly("exchange-" + peer + "-" + e.GetType().Name, $"Control channel to {peer} failed: {e.Message}");
+                }
+
+                return null;
+            }
+        }
+
+        /// <summary>Where to try a PC, best first: its live MWB connection, the Name → IP setting, DNS, the last known addresses.</summary>
+        internal static async Task<IPAddress[]> ResolveAsync(string peer, CancellationToken ct)
+        {
+            var found = new List<IPAddress>();
+            void Add(IPAddress a)
+            {
+                if (a == null)
+                {
+                    return;
+                }
+
+                if (a.IsIPv4MappedToIPv6)
+                {
+                    a = a.MapToIPv4();
+                }
+
+                if (!found.Contains(a))
+                {
+                    found.Add(a);
+                }
+            }
+
+            if (IPAddress.TryParse(peer, out IPAddress literal))
+            {
+                Add(literal);
+                return found.ToArray();
+            }
+
+            foreach (PcStatus pc in LiteStatus.Current.Pcs.Where(p => p.State == PcState.Connected && p.Address != null && p.Name.Equals(peer, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (IPAddress.TryParse(pc.Address, out IPAddress live))
+                {
+                    Add(live);
+                }
+            }
+
+            try
+            {
+                string[] lines = (Setting.Values.Name2IP ?? string.Empty).Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+                if (LiteDiagnostics.ParseName2Ip(lines).TryGetValue(peer, out string fixedIp) && IPAddress.TryParse(fixedIp, out IPAddress mapped))
+                {
+                    Add(mapped);
+                }
+            }
+            catch (Exception e) when (e is NullReferenceException or TypeInitializationException or IOException)
+            {
+                // settings not loaded (tests): skip
+            }
+
+            try
+            {
+                IPAddress[] dns = await Dns.GetHostAddressesAsync(peer, ct).WaitAsync(DnsTimeout, ct).ConfigureAwait(false);
+                foreach (IPAddress a in dns.Where(a => a.AddressFamily == AddressFamily.InterNetwork || (a.AddressFamily == AddressFamily.InterNetworkV6 && !a.IsIPv6LinkLocal)).OrderBy(a => a.AddressFamily == AddressFamily.InterNetwork ? 0 : 1))
+                {
+                    Add(a);
+                }
+            }
+            catch (Exception e) when (e is SocketException or TimeoutException)
+            {
+                // right after waking, names often don't resolve yet: fall through to the address book
+            }
+
+            foreach (IPAddress a in LiteAddressBook.Get(peer))
+            {
+                Add(a);
+            }
+
+            return found.ToArray();
+        }
+
+        // Tries each address in turn within ConnectTimeout in total (a refusal moves on at once).
+        private static async Task<Socket> ConnectAsync(IPAddress[] candidates, int port, CancellationToken ct)
+        {
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            budget.CancelAfter(ConnectTimeout);
+            foreach (IPAddress address in candidates)
+            {
+                var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+                try
+                {
+                    await socket.ConnectAsync(address, port, budget.Token).ConfigureAwait(false);
+                    return socket;
+                }
+                catch (Exception e) when (e is SocketException or OperationCanceledException)
+                {
+                    socket.Dispose();
+                    ct.ThrowIfCancellationRequested();
+                    if (budget.IsCancellationRequested)
+                    {
+                        return null;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        // ---- hello ----------------------------------------------------------------------------------------------
 
         /// <summary>
         /// Raised (on a worker thread) after a PC answers "hello": the engine says hello to each PC when it connects,
@@ -55,9 +503,166 @@ namespace MouseWithoutBorders.Lite
         /// </summary>
         internal static event Action<string, PeerInfo> PeerHello;
 
-        private static void OnPeerHello(string peer, PeerInfo info) => PeerHello?.Invoke(peer, info);
+        private static void OnPeerHello(string peer, PeerInfo info)
+        {
+            Action<string, PeerInfo> handlers = PeerHello;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (Action<string, PeerInfo> subscriber in handlers.GetInvocationList().Cast<Action<string, PeerInfo>>())
+            {
+                try
+                {
+                    subscriber(peer, info);
+                }
+                catch (Exception e)
+                {
+                    LiteLog.Write(nameof(LiteControl), "A hello subscriber failed: " + e.Message);
+                }
+            }
+        }
 
         /// <summary>Asks a PC who it is. Null if it didn't answer. Also records its MAC addresses for Wake.</summary>
-        internal static Task<PeerInfo> HelloAsync(string peer, CancellationToken ct) => throw new NotImplementedException();
+        internal static async Task<PeerInfo> HelloAsync(string peer, CancellationToken ct)
+        {
+            PeerInfo info = ParseHello(peer, await SendAsync(peer, "hello", null, ct).ConfigureAwait(false));
+            if (info == null)
+            {
+                return null;
+            }
+
+            LiteWake.RememberMacs(peer, info.Macs);
+            OnPeerHello(peer, info);
+            return info;
+        }
+
+        /// <summary>What this PC tells others about itself.</summary>
+        internal static JsonObject HelloReply()
+        {
+            (int width, int height, int heightMm) = PrimaryScreen();
+            return new JsonObject
+            {
+                ["name"] = (Common.MachineName ?? Environment.MachineName).Trim(),
+                ["version"] = LiteUpdate.CurrentText,
+                ["macs"] = new JsonArray(LiteWake.LocalMacs().Select(m => (JsonNode)JsonValue.Create(m)).ToArray()),
+                ["screenWidth"] = width,
+                ["screenHeight"] = height,
+                ["screenHeightMm"] = heightMm,
+            };
+        }
+
+        /// <summary>Reads a "hello" reply into a <see cref="PeerInfo"/>; null if the PC didn't answer or said no.</summary>
+        internal static PeerInfo ParseHello(string peer, JsonObject reply)
+        {
+            if (reply == null || !Field(reply, "ok", false))
+            {
+                return null;
+            }
+
+            var macs = new List<string>();
+            if (reply["macs"] is JsonArray array)
+            {
+                foreach (JsonNode node in array)
+                {
+                    if (node is JsonValue v && v.TryGetValue(out string text) && LiteWake.TryParseMac(text, out byte[] bytes))
+                    {
+                        macs.Add(LiteWake.FormatMac(bytes));
+                    }
+                }
+            }
+
+            string name = Field(reply, "name", string.Empty).Trim();
+            return new PeerInfo(
+                name.Length > 0 ? name : peer,
+                Field(reply, "version", string.Empty),
+                macs.Distinct().ToList(),
+                Field(reply, "screenWidth", 0),
+                Field(reply, "screenHeight", 0),
+                Field(reply, "screenHeightMm", 0));
+        }
+
+        // A field of the expected type, or the fallback (a reply from another version may omit or change anything).
+        private static T Field<T>(JsonObject obj, string name, T fallback)
+        {
+            try
+            {
+                return obj[name] is JsonValue v && v.TryGetValue(out T value) && value != null ? value : fallback;
+            }
+            catch (Exception e) when (e is InvalidOperationException or FormatException)
+            {
+                return fallback;
+            }
+        }
+
+        // ---- this PC's screen -----------------------------------------------------------------------------------
+
+        [DllImport("user32.dll")]
+        private static extern int GetSystemMetrics(int index);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetDC(IntPtr window);
+
+        [DllImport("user32.dll")]
+        private static extern int ReleaseDC(IntPtr window, IntPtr dc);
+
+        [DllImport("gdi32.dll")]
+        private static extern int GetDeviceCaps(IntPtr dc, int index);
+
+        private const int SmCxScreen = 0, SmCyScreen = 1, VertSize = 6;
+
+        /// <summary>Primary screen in pixels, and its physical height in millimetres as Windows reports it (0 if unknown).</summary>
+        internal static (int Width, int Height, int HeightMm) PrimaryScreen()
+        {
+            try
+            {
+                int mm = 0;
+                IntPtr dc = GetDC(IntPtr.Zero);
+                if (dc != IntPtr.Zero)
+                {
+                    try
+                    {
+                        mm = Math.Max(0, GetDeviceCaps(dc, VertSize));
+                    }
+                    finally
+                    {
+                        _ = ReleaseDC(IntPtr.Zero, dc);
+                    }
+                }
+
+                return (GetSystemMetrics(SmCxScreen), GetSystemMetrics(SmCyScreen), mm);
+            }
+            catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException)
+            {
+                return (0, 0, 0);
+            }
+        }
+
+        // ---- helpers --------------------------------------------------------------------------------------------
+
+        private static void CloseQuietly(Socket socket)
+        {
+            try
+            {
+                socket.Close();
+            }
+            catch (Exception e) when (e is SocketException or ObjectDisposedException)
+            {
+            }
+        }
+
+        // Failures are routine (a PC that is off, an older version): one log line per kind of failure per 10 minutes.
+        private static void LogQuietly(string what, string message)
+        {
+            DateTime now = DateTime.UtcNow;
+            if (LastLogged.TryGetValue(what, out DateTime last) && now - last < LogEvery)
+            {
+                return;
+            }
+
+            LastLogged[what] = now;
+            LiteLog.Write(nameof(LiteControl), message);
+        }
     }
 }

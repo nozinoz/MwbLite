@@ -815,7 +815,7 @@ namespace MouseWithoutBorders.Lite.Ui
             string label = key switch
             {
                 "machines" => "PCs",
-                "advanced.tcpPort must be between 1024 and 65534 (MWB also uses tcpPort+1)." => "TCP port",
+                "advanced.tcpPort must be between 1024 and 65532 (MwbLite also uses tcpPort+1 and tcpPort+3)." => "TCP port",
                 "advanced.name2Ip" => "Name → IP",
                 "advanced.hotkeys.toggleEasyMouse" => "Toggle Easy Mouse",
                 "advanced.hotkeys.lockMachine" => "Lock this PC",
@@ -826,7 +826,7 @@ namespace MouseWithoutBorders.Lite.Ui
 
             if (error.StartsWith("advanced.tcpPort", StringComparison.Ordinal))
             {
-                return "TCP port (Advanced): use a number between 1024 and 65534.";
+                return "TCP port (Advanced): use a number between 1024 and 65532.";
             }
 
             return label == null ? error : label + ": " + error[(colon + 2)..];

@@ -420,12 +420,13 @@ namespace MouseWithoutBorders.Lite
         }
 
         // Inbound rules for this program only, from the local subnet only (upstream allowed any address):
-        // MWB on tcpPort (clipboard/files) and tcpPort+1 (input/control), pairing on TCP and UDP 15102.
+        // MWB on tcpPort (clipboard/files) and tcpPort+1 (input/control), MwbLite's control channel on tcpPort+3,
+        // pairing on TCP and UDP 15102.
         private static void SetFirewallRule(string exe, int tcpPort)
         {
             int pairing = Pairing.PairingDefaults.Port;
             DeleteFirewallRules();
-            RunNetsh($"advfirewall firewall add rule name=\"{FirewallRuleName}\" dir=in action=allow program=\"{exe}\" enable=yes profile=any protocol=tcp localport={tcpPort},{tcpPort + 1},{pairing} remoteip=localsubnet");
+            RunNetsh($"advfirewall firewall add rule name=\"{FirewallRuleName}\" dir=in action=allow program=\"{exe}\" enable=yes profile=any protocol=tcp localport={tcpPort},{tcpPort + 1},{tcpPort + 3},{pairing} remoteip=localsubnet");
             RunNetsh($"advfirewall firewall add rule name=\"{FirewallRuleName} pairing\" dir=in action=allow program=\"{exe}\" enable=yes profile=any protocol=udp localport={pairing} remoteip=localsubnet");
         }
 

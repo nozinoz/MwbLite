@@ -64,15 +64,46 @@ namespace MouseWithoutBorders.Lite
 
             // 4. Each PC
             Dictionary<string, string> name2Ip = ParseName2Ip(cfg.Advanced.Name2Ip);
-            await Task.WhenAll(others.Select(async pc => report(await CheckPcAsync(pc, cfg, name2Ip, status, ct).ConfigureAwait(false)))).ConfigureAwait(false);
+            await Task.WhenAll(others.Select(async pc =>
+            {
+                var answering = new AnsweringAddress();
+                report(await CheckPcAsync(pc, cfg, name2Ip, status, answering, ct).ConfigureAwait(false));
+                if (answering.Address != null)
+                {
+                    report(await CheckControlChannelAsync(pc, answering.Address, cfg, ct).ConfigureAwait(false));
+                }
+            })).ConfigureAwait(false);
         }
 
-        private static async Task<CheckItem> CheckPcAsync(string pc, LiteConfig cfg, Dictionary<string, string> name2Ip, StatusSnapshot status, CancellationToken ct)
+        /// <summary>The address of a PC that answered with the right key, if any (so its control channel can be checked too).</summary>
+        private sealed class AnsweringAddress
+        {
+            internal IPAddress Address { get; set; }
+        }
+
+        // MwbLite's own channel (Wake, Lock all PCs, Sleep all PCs, version info) on tcpPort+3. A PC that is connected
+        // but doesn't answer there usually runs an older MwbLite: a warning, not an error, since input still works.
+        private static async Task<CheckItem> CheckControlChannelAsync(string pc, IPAddress address, LiteConfig cfg, CancellationToken ct)
+        {
+            int port = LiteControl.PortFor(cfg.Advanced.TcpPort);
+            switch (await LiteSecureChannel.ProbeAsync(address, port, cfg.SecurityKey, ConnectTimeout, ct).ConfigureAwait(false))
+            {
+                case LiteSecureChannel.ProbeResult.KeyMatches:
+                    return new CheckItem(CheckResult.Ok, "MwbLite control channel (" + pc + ")", $"{pc} answers on port {port} (used for Wake, Lock all PCs and Sleep all PCs).");
+                case LiteSecureChannel.ProbeResult.KeyMismatch:
+                    return new CheckItem(CheckResult.Warning, "MwbLite control channel (" + pc + ")", $"{pc} answers on port {port} but with a different security key.");
+                default:
+                    return new CheckItem(CheckResult.Warning, "MwbLite control channel (" + pc + ")", $"{pc} doesn't answer on port {port}. It probably runs an older MwbLite: update it to this version (mouse and keyboard sharing still work). If it is up to date, run Check connection there and press Fix firewall.");
+            }
+        }
+
+        private static async Task<CheckItem> CheckPcAsync(string pc, LiteConfig cfg, Dictionary<string, string> name2Ip, StatusSnapshot status, AnsweringAddress answering, CancellationToken ct)
         {
             int tcpPort = cfg.Advanced.TcpPort;
             PcStatus live = status?.Pcs.FirstOrDefault(p => p.Name.Equals(pc, StringComparison.OrdinalIgnoreCase));
             if (live?.State == PcState.Connected)
             {
+                answering.Address = IPAddress.TryParse(live.Address, out IPAddress liveAddress) ? liveAddress : null;
                 return new CheckItem(CheckResult.Ok, pc, "Connected" + (live.Address != null ? " (" + live.Address + ")" : string.Empty) + ".");
             }
 
@@ -120,6 +151,7 @@ namespace MouseWithoutBorders.Lite
                     case LiteSecureChannel.ProbeResult.OlderVersion:
                         return new CheckItem(CheckResult.Problem, pc, $"{where} runs an older MwbLite (or PowerToys Mouse Without Borders) without the secure connection. Install this version there, or (not recommended) allow older versions in Settings > Advanced on both PCs.");
                     case LiteSecureChannel.ProbeResult.KeyMatches:
+                        answering.Address = target;
                         if (filePort && sameSubnet && live?.State != PcState.Connecting)
                         {
                             return new CheckItem(CheckResult.Warning, pc, $"{where} answers and has the same security key, but MwbLite isn't connected to it yet. If this lasts, use Reconnect (Win+Ctrl+Alt+R) or restart MwbLite on both PCs.");

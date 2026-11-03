@@ -189,6 +189,7 @@ internal static class InitAndCleanup
     {
         try
         {
+            Lite.LiteControl.Stop(); // MwbLite: the control channel listener
             Common.SendByeBye();
 
             // UnhookClipboard();

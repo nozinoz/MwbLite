@@ -178,6 +178,35 @@ namespace MouseWithoutBorders.Lite
             }
         }
 
+        /// <summary>
+        /// The same TLS handshake and key proof as <see cref="Establish(Socket, bool, string, string)"/>, but with no
+        /// fallback to the old protocol and no side effects on the tray status: anything that isn't a complete,
+        /// key-proven TLS session throws. For MwbLite's own control channel (LiteControl), which older versions never
+        /// spoke, so there is nothing to be compatible with. The caller owns the socket and disposes the stream.
+        /// </summary>
+        internal static Stream EstablishStrict(Socket socket, bool isClient, string securityKey)
+        {
+            int oldReceive = socket.ReceiveTimeout, oldSend = socket.SendTimeout;
+            socket.ReceiveTimeout = socket.SendTimeout = (int)HandshakeTimeout.TotalMilliseconds;
+            var ssl = new SslStream(new NetworkStream(socket, ownsSocket: false), leaveInnerStreamOpen: false);
+            try
+            {
+                Authenticate(ssl, isClient);
+                ProveKey(ssl, isClient, securityKey);
+                return ssl;
+            }
+            catch (Exception)
+            {
+                ssl.Dispose();
+                throw;
+            }
+            finally
+            {
+                socket.ReceiveTimeout = oldReceive;
+                socket.SendTimeout = oldSend;
+            }
+        }
+
         private static Stream Legacy(Socket socket, string peer, string address, string why)
         {
             if (!AllowInsecure())

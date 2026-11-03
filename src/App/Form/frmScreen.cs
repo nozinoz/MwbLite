@@ -267,12 +267,62 @@ namespace MouseWithoutBorders
                     }
                 }
 
+                AddLitePowerItems(status);
+
                 menuGetScreenCapture.DropDown.Items[0].Enabled = menuGetScreenCapture.DropDown.Items.Count > 1;
             }
             catch (Exception e)
             {
                 Logger.Log(e);
             }
+        }
+
+        // MwbLite: below the list of PCs, in their own group: Wake <PC> for each PC that is not connected and whose
+        // network card address is known (learned while it was connected), then Lock all PCs and Sleep all PCs.
+        // Tagged "MACHINE: " like the PC items so the next UpdateMenu removes them with those.
+        private void AddLitePowerItems(Lite.StatusSnapshot status)
+        {
+            ToolStripSeparator separator = new();
+            separator.Tag = "MACHINE: separator";
+            _ = MainMenu.Items.Add(separator);
+
+            foreach (Lite.PcStatus pc in status.Pcs)
+            {
+                if (pc.State is Lite.PcState.ThisPc or Lite.PcState.Connected || !Lite.LiteWake.CanWake(pc.Name))
+                {
+                    continue;
+                }
+
+                string name = pc.Name;
+                ToolStripMenuItem wake = new("Wake " + name, null, (s, e) =>
+                {
+                    if (Lite.LiteWake.Wake(name))
+                    {
+                        Common.ShowToolTip($"Sent a wake-up signal to {name}. It can take a minute to start and connect.", 5000, ToolTipIcon.Info);
+                    }
+                });
+                wake.Tag = "MACHINE: wake " + name;
+                wake.ToolTipText = "Wake-on-LAN: needs a wired network and \"Wake on Magic Packet\" turned on in that PC's BIOS and network adapter settings.";
+                _ = MainMenu.Items.Add(wake);
+            }
+
+            ToolStripMenuItem lockAll = new("Lock all PCs", null, (s, e) => _ = System.Threading.Tasks.Task.Run(Lite.LitePower.LockAllAsync));
+            lockAll.Tag = "MACHINE: lock all";
+            _ = MainMenu.Items.Add(lockAll);
+
+            ToolStripMenuItem sleepAll = new("Sleep all PCs…", null, (s, e) =>
+            {
+                if (MessageBox.Show(
+                    "Put every connected PC, and this one, to sleep?",
+                    Application.ProductName,
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question) == DialogResult.Yes)
+                {
+                    _ = System.Threading.Tasks.Task.Run(Lite.LitePower.SleepAllAsync);
+                }
+            });
+            sleepAll.Tag = "MACHINE: sleep all";
+            _ = MainMenu.Items.Add(sleepAll);
         }
 
         // We dont do something heavy in our timer
