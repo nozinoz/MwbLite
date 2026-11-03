@@ -69,6 +69,18 @@ namespace MouseWithoutBorders.Lite
         /// <summary>Show a tray notice when a PC that was connected drops off for 20 s or more, and when it is back.</summary>
         public bool NotifyConnectionChanges { get; set; } = true;
 
+        /// <summary>
+        /// Install a new version by itself when the weekly check finds one (no prompt). Needs MwbLite installed with
+        /// Setup, which adds the administrator task that does it.
+        /// </summary>
+        public bool InstallUpdatesAutomatically { get; set; }
+
+        /// <summary>
+        /// Update this PC when a connected MwbLite PC announces a newer version, and tell connected PCs that are older
+        /// than this one to update. Both only ever lead to the latest release published on GitHub.
+        /// </summary>
+        public bool UpdateWithOtherPcs { get; set; } = true;
+
         public bool StartWithWindows { get; set; }
 
         /// <summary>Run through the MwbLite.Service Windows service (lock screen / UAC prompt support). Needs "--install".</summary>

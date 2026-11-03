@@ -93,6 +93,28 @@ namespace MouseWithoutBorders.Class
             }
         }
 
+        internal bool InstallUpdatesAutomatically
+        {
+            get
+            {
+                lock (_loadingSettingsLock)
+                {
+                    return _config.InstallUpdatesAutomatically;
+                }
+            }
+        }
+
+        internal bool UpdateWithOtherPcs
+        {
+            get
+            {
+                lock (_loadingSettingsLock)
+                {
+                    return _config.UpdateWithOtherPcs;
+                }
+            }
+        }
+
         internal bool AllowInsecureConnections
         {
             get

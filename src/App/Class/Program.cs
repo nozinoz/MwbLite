@@ -223,6 +223,7 @@ namespace MouseWithoutBorders.Class
 
                 InitAndCleanup.Init();
                 LiteLayoutSync.SeedPool(MachineStuff.MachineMatrix);
+                LiteAutoUpdate.Start(); // answers "update-available" from other PCs and tells older ones (needs LiteControl)
 
                 if (runningAsSystem)
                 {

@@ -8,6 +8,8 @@
     - the MwbLite.Service service (demand start; local users may start/stop it, as with the install command)
     - inbound firewall rules for MwbLite.exe, local subnet only: TCP (MWB + pairing), UDP 15102 (pairing discovery)
     - HKLM\SOFTWARE\MwbLite\InstallSource=msi (the app then leaves service/firewall management to this package)
+    - the on-demand scheduled task "MwbLite Update" (runs the installed MwbLite.exe with the install-update option as
+      SYSTEM; any signed-in user may start it), created and removed through MwbLite.exe itself by two custom actions below
   Uninstall also removes %ProgramData%\MwbLite (the service's copy of the key) and the user's Run entry.
   Per-user settings (%LOCALAPPDATA%\MwbLite) are kept.
 -->
@@ -63,11 +65,20 @@
          user (runs as that user). Unticked changes nothing. -->
     <CustomAction Id="SetStartupEntry" FileRef="MwbLiteExe" ExeCommand="--enable-startup" Execute="deferred" Impersonate="yes" Return="ignore" />
     <CustomAction Id="RemoveServiceData" FileRef="MwbLiteExe" ExeCommand="--uninstall-cleanup" Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <!-- The "MwbLite Update" scheduled task (SYSTEM, on demand only) that lets MwbLite install updates without a UAC
+         prompt. Added on install, upgrade and repair, after the files are in place; removed on full uninstall (not when
+         an upgrade removes the old version, whose task the new version has just replaced). Run as SYSTEM (not the
+         installing user). A failure doesn't fail the install: updates then ask for UAC as they did before. -->
+    <CustomAction Id="RegisterUpdateTask" FileRef="MwbLiteExe" ExeCommand="--register-update-task" Execute="deferred" Impersonate="no" Return="ignore" />
+    <CustomAction Id="UnregisterUpdateTask" FileRef="MwbLiteExe" ExeCommand="--unregister-update-task" Execute="deferred" Impersonate="no" Return="ignore" />
     <InstallExecuteSequence>
       <Custom Action="StopRunningMwbLite" Before="InstallValidate" />
       <Custom Action="SetStartupEntry" After="InstallFiles" Condition="STARTWITHWINDOWS=&quot;1&quot; AND NOT REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="RegisterUpdateTask" After="InstallFiles" Condition="NOT REMOVE~=&quot;ALL&quot;" />
       <Custom Action="RemoveStartupEntry" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="RemoveServiceData" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="UnregisterUpdateTask" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
   </Package>
 

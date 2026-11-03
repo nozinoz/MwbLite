@@ -1,5 +1,8 @@
 // MwbLite Settings > About: version and build details, links to the project, the update status (from the
-// project's GitHub Releases) with release notes, and Update, which downloads and verifies the new Setup and runs it.
+// project's GitHub Releases) with release notes, and Update. When Setup installed MwbLite, Update starts the
+// "MwbLite Update" scheduled task, which installs the new version as SYSTEM with no prompt; otherwise it downloads and
+// verifies the new Setup and runs it (UAC). Also the switches for the weekly check, installing updates automatically
+// and updating together with the other PCs.
 using System;
 using System.Diagnostics;
 using System.Globalization;
@@ -49,6 +52,10 @@ namespace MouseWithoutBorders.Lite.Ui
             var updates = Kit.Card(Kit.Stack(updateStatus, updateDetail, buttons, updateProgress, releaseNotes));
             ShowUpdateState(LiteUpdate.ReadState());
 
+            // Without the update task (MwbLite not installed with Setup) there is no way to install by itself.
+            bool canAutoInstall = PreviewMode || LiteUpdate.CanUpdateWithoutPrompt();
+            installUpdatesAutomatically.IsEnabled = canAutoInstall;
+
             var copy = Kit.Button("Copy details", (_, _) =>
             {
                 WpfClipboard.SetText(DetailsText());
@@ -65,6 +72,10 @@ namespace MouseWithoutBorders.Lite.Ui
                 Kit.Section("Updates"),
                 updates,
                 Kit.Row("", "Check for updates every week", "Asks GitHub once a week whether a new version is out and shows a notification. Nothing about you or this PC is sent.", checkForUpdates),
+                Kit.Row("", "Install updates automatically", canAutoInstall
+                    ? "When the weekly check finds a new version, install it and restart MwbLite, without asking. Needs \"Check for updates every week\"."
+                    : "Only when MwbLite was installed with Setup. Installing the new version then needs no administrator prompt.", installUpdatesAutomatically),
+                Kit.Row("", "Update together with my other PCs", "When another of your PCs runs a newer MwbLite, update this PC too, and tell connected PCs that are older. Only ever installs the latest release from GitHub.", updateWithOtherPcs),
                 Kit.Section("Details"),
                 Kit.Card(Kit.Stack(
                     DetailsGrid(),
@@ -202,7 +213,9 @@ namespace MouseWithoutBorders.Lite.Ui
                 {
                     updateStatus.Text = $"Version {r.Version.ToString(3)} is available";
                     updateDetail.Text = $"You have {LiteUpdate.CurrentText}. Released {r.PublishedUtc.ToLocalTime().ToString("d MMMM yyyy", CultureInfo.CurrentCulture)}."
-                        + (r.SetupUrl == null ? " This release has no Setup to download; get it from the release page." : " Update downloads Setup from GitHub, checks it, and installs it (one UAC prompt).");
+                        + (r.SetupUrl == null ? " This release has no Setup to download; get it from the release page."
+                            : LiteUpdate.CanUpdateWithoutPrompt() ? " Update downloads Setup from GitHub, checks it, installs it and restarts MwbLite, with no administrator prompt."
+                            : " Update downloads Setup from GitHub, checks it, and installs it (one UAC prompt).");
                     updateButton.Visibility = r.SetupUrl == null ? Visibility.Collapsed : Visibility.Visible;
                 }
                 else
@@ -247,6 +260,14 @@ namespace MouseWithoutBorders.Lite.Ui
             }
 
             updateButton.IsEnabled = checkUpdateButton.IsEnabled = false;
+
+            // Installed with Setup: the update task downloads and installs it as SYSTEM, no UAC prompt.
+            if (await Task.Run(LiteUpdate.TryStartElevatedUpdate))
+            {
+                await WaitForElevatedUpdateAsync(r);
+                return;
+            }
+
             updateProgress.Visibility = Visibility.Visible;
             updateProgress.Value = 0;
             updateStatus.Text = $"Downloading MwbLite {r.Version.ToString(3)}…";
@@ -271,6 +292,34 @@ namespace MouseWithoutBorders.Lite.Ui
                 updateProgress.Visibility = Visibility.Collapsed;
                 updateButton.IsEnabled = checkUpdateButton.IsEnabled = true;
             }
+        }
+
+        // The update task replaces MwbLite, which closes this window too. If it is still here once the task is done, the
+        // update didn't happen, so say so.
+        private async Task WaitForElevatedUpdateAsync(ReleaseInfo r)
+        {
+            updateStatus.Text = $"Installing {r.Version.ToString(3)}…";
+            updateDetail.Text = "MwbLite will restart.";
+            updateProgress.IsIndeterminate = true;
+            updateProgress.Visibility = Visibility.Visible;
+
+            await Task.Delay(TimeSpan.FromSeconds(3));
+            DateTime until = DateTime.UtcNow.AddMinutes(30);
+            while (IsVisible && DateTime.UtcNow < until && await Task.Run(LiteUpdateTask.IsRunning))
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2));
+            }
+
+            if (!IsVisible)
+            {
+                return;
+            }
+
+            updateProgress.IsIndeterminate = false;
+            updateProgress.Visibility = Visibility.Collapsed;
+            updateStatus.Text = "The update didn't finish";
+            updateDetail.Text = "MwbLite is still version " + LiteUpdate.CurrentText + ". The details are in " + Path.Combine(LitePaths.ServiceDir, "logs", "update.log") + " (administrators can read it).";
+            updateButton.IsEnabled = checkUpdateButton.IsEnabled = true;
         }
 
         // ---- diagnostics ----------------------------------------------------------------------------------
