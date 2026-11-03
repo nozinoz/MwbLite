@@ -43,7 +43,8 @@ public sealed class UpdateTests
         Assert.AreEqual(new Version(9, 1, 0), r.Version);
         Assert.AreEqual("MwbLite-Setup-9.1.0.exe", r.SetupName);
         Assert.AreEqual(8500000, r.SetupSize);
-        Assert.AreEqual("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", r.SetupSha256);
+        Assert.AreEqual("https://github.com/nozinoz/MwbLite/releases/download/v9.1.0/MwbLite-Setup-9.1.0.exe", r.SetupUrl);
+        Assert.IsNull(r.SignatureUrl, "this release has no SHA256SUMS.txt.sig");
         StringAssert.EndsWith(r.ChecksumsUrl, "SHA256SUMS.txt");
         Assert.AreEqual(new DateTime(2026, 11, 2, 9, 30, 0, DateTimeKind.Utc), r.PublishedUtc);
         Assert.IsTrue(LiteUpdate.IsNewer(r));
@@ -56,7 +57,6 @@ public sealed class UpdateTests
     {
         ReleaseInfo r = LiteUpdate.ParseLatest("""{ "tag_name": "v9.0.0", "assets": [] }""");
         Assert.IsNull(r.SetupUrl);
-        Assert.IsNull(r.SetupSha256);
         Assert.IsNull(LiteUpdate.ParseLatest("""{ "tag_name": "nightly" }"""));
     }
 

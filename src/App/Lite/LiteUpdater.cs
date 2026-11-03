@@ -6,8 +6,9 @@
 //    and runs that copy, which does the rest. The task's own process just waits for it.
 // 2. The copy asks GitHub for the latest release (LiteUpdate.GetLatestAsync) and stops if it isn't newer than the
 //    installed version. Otherwise it downloads the release's Setup into %ProgramData%\MwbLite\update, a folder only
-//    SYSTEM and Administrators can write (explicit ACL, no inheritance), and verifies it against the SHA-256 GitHub
-//    publishes for it.
+//    SYSTEM and Administrators can write (explicit ACL, no inheritance). It first checks that the release's
+//    SHA256SUMS.txt is signed with the release key built into this program (LiteReleaseKey) and refuses the release
+//    if it isn't; Setup must then match the SHA-256 in that signed list.
 // 3. Right before running it, the file is opened again with writing and deleting denied to everyone else, hashed once
 //    more on that handle, and run with "/quiet /norestart" while the handle is still held, so the file that was
 //    checked is the file that runs. Its exit code goes to the system log (%ProgramData%\MwbLite\logs\update.log).
@@ -44,6 +45,7 @@ namespace MouseWithoutBorders.Lite
         private const int ExitNotElevated = 5;
         private const int ExitBusy = 10;
         private const int ExitSetupFailed = 12;
+        private const int ExitNotSigned = 13;
 
         /// <summary>Where the update is downloaded and the staged copy runs from: SYSTEM and Administrators only.</summary>
         internal static string UpdateDir => Path.Combine(LitePaths.ServiceDir, "update");
@@ -189,7 +191,17 @@ namespace MouseWithoutBorders.Lite
                     File.Delete(old);
                 }
 
-                LiteUpdate.VerifiedSetup setup = LiteUpdate.DownloadVerifiedAsync(release, null, UpdateDir, cts.Token).GetAwaiter().GetResult();
+                LiteUpdate.VerifiedSetup setup;
+                try
+                {
+                    setup = LiteUpdate.DownloadVerifiedAsync(release, null, UpdateDir, cts.Token).GetAwaiter().GetResult();
+                }
+                catch (ReleaseNotSignedException)
+                {
+                    LiteLog.Write(nameof(LiteUpdater), ReleaseNotSignedException.Text);
+                    return ExitNotSigned;
+                }
+
                 int code = RunVerifiedSetup(setup.Path, setup.Sha256);
                 LiteLog.Write(nameof(LiteUpdater), $"Setup exited with code {code}.");
 

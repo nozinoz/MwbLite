@@ -3,8 +3,13 @@
 // - Check: one HTTPS GET of https://api.github.com/repos/<repo>/releases/latest (nothing about the PC or user is
 //   sent beyond a "MwbLite/<version>" user agent). Weekly in the background (checkForUpdates, default on), and on
 //   demand from Settings > About.
-// - Update: downloads the release's MwbLite-Setup-<version>.exe over HTTPS, checks its size and SHA-256 (the digest
-//   GitHub reports for the asset, or the release's SHA256SUMS.txt), then installs it. Two ways:
+// - Signed releases: an update is installed only if the release carries SHA256SUMS.txt and SHA256SUMS.txt.sig and the
+//   signature verifies with the release key built into this program (LiteReleaseKey). Both files and Setup must come
+//   from https://github.com/<repo>/releases/download/. The SHA-256 Setup must have is taken from that verified list,
+//   never from the digest GitHub's API reports, and there is no fallback: a release without a good signature is not
+//   installed. The weekly check may still show that such a release exists (CheckSignatureAsync says if it is signed).
+// - Update: downloads the release's MwbLite-Setup-<version>.exe over HTTPS, checks its SHA-256 against the verified
+//   list, then installs it. Two ways:
 //   * With the "MwbLite Update" scheduled task (added by Setup, see LiteUpdateTask), TryStartElevatedUpdate starts
 //     the task and LiteUpdater does the download and install as SYSTEM, silently, with no UAC prompt.
 //   * Otherwise the user's MwbLite downloads Setup to its temp folder and starts it; Setup shows its own window and
@@ -19,6 +24,7 @@ using System.Net;
 using System.Net.Http;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -35,13 +41,31 @@ namespace MouseWithoutBorders.Lite
         string SetupName,
         string SetupUrl,
         long SetupSize,
-        string SetupSha256,
-        string ChecksumsUrl);
+        string ChecksumsUrl,
+        string SignatureUrl);
+
+    /// <summary>The release isn't signed with MwbLite's release key (no signature, a bad one, or files from the wrong place).</summary>
+    internal sealed class ReleaseNotSignedException : IOException
+    {
+        internal const string Text = "This release isn't signed with MwbLite's release key; not installing it.";
+
+        internal ReleaseNotSignedException()
+            : base(Text)
+        {
+        }
+    }
 
     internal static class LiteUpdate
     {
         internal const string Repo = "nozinoz/MwbLite";
         internal static readonly TimeSpan CheckInterval = TimeSpan.FromDays(7);
+
+        /// <summary>Everything an update downloads (Setup, the checksum list, its signature) must come from here.</summary>
+        internal const string DownloadPrefix = "https://github.com/" + Repo + "/releases/download/";
+
+        // The checksum list lists two files and the signature is 88 characters; anything bigger is not what we asked for.
+        private const int MaxChecksumsBytes = 256 * 1024;
+        private const int MaxSignatureBytes = 4 * 1024;
 
         internal static string RepoUrl => "https://github.com/" + Repo;
 
@@ -94,7 +118,7 @@ namespace MouseWithoutBorders.Lite
                 return null;
             }
 
-            string setupName = null, setupUrl = null, sha = null, sums = null;
+            string setupName = null, setupUrl = null, sums = null, sig = null;
             long size = 0;
             if (root.TryGetProperty("assets", out JsonElement assets) && assets.ValueKind == JsonValueKind.Array)
             {
@@ -106,26 +130,28 @@ namespace MouseWithoutBorders.Lite
                         setupName = name;
                         setupUrl = Str(a, "browser_download_url");
                         size = a.TryGetProperty("size", out JsonElement s) && s.TryGetInt64(out long n) ? n : 0;
-                        string digest = Str(a, "digest");
-                        sha = digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) ? digest[7..].ToLowerInvariant() : null;
                     }
                     else if (name.Equals("SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase))
                     {
                         sums = Str(a, "browser_download_url");
                     }
+                    else if (name.Equals("SHA256SUMS.txt.sig", StringComparison.OrdinalIgnoreCase))
+                    {
+                        sig = Str(a, "browser_download_url");
+                    }
                 }
             }
 
             DateTime published = DateTime.TryParse(Str(root, "published_at"), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out DateTime p) ? p : DateTime.MinValue;
-            return new ReleaseInfo(version, tag, Str(root, "name"), Str(root, "body"), Str(root, "html_url"), published, setupName, setupUrl, size, sha, sums);
+            return new ReleaseInfo(version, tag, Str(root, "name"), Str(root, "body"), Str(root, "html_url"), published, setupName, setupUrl, size, sums, sig);
         }
 
         private static string Str(JsonElement e, string name) =>
             e.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? string.Empty : string.Empty;
 
-        private static HttpClient NewClient(TimeSpan timeout)
+        private static HttpClient NewClient(TimeSpan timeout, HttpMessageHandler handler = null)
         {
-            var http = new HttpClient { Timeout = timeout };
+            var http = handler == null ? new HttpClient { Timeout = timeout } : new HttpClient(handler, disposeHandler: false) { Timeout = timeout };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("MwbLite/" + CurrentText);
             http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
             return http;
@@ -147,33 +173,116 @@ namespace MouseWithoutBorders.Lite
             return r;
         }
 
-        /// <summary>Downloads the release's Setup to the user's temp folder, checks its SHA-256, and returns its path.</summary>
+        /// <summary>
+        /// True if <paramref name="url"/> is a GitHub release download of this project: https, github.com, no user info
+        /// or odd port, and a path (with any "." and ".." resolved) under /<repo>/releases/download/.
+        /// </summary>
+        internal static bool IsPinnedUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url) || !url.StartsWith(DownloadPrefix, StringComparison.OrdinalIgnoreCase) || !Uri.TryCreate(url, UriKind.Absolute, out Uri u))
+            {
+                return false;
+            }
+
+            return u.Scheme == Uri.UriSchemeHttps && u.Host == "github.com" && u.IsDefaultPort && string.IsNullOrEmpty(u.UserInfo)
+                && u.AbsolutePath.StartsWith(new Uri(DownloadPrefix).AbsolutePath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Downloads the release's Setup to the user's temp folder, checks it against the signed checksums, and returns its path.</summary>
         internal static async Task<string> DownloadSetupAsync(ReleaseInfo r, IProgress<double> progress, CancellationToken ct) =>
             (await DownloadVerifiedAsync(r, progress, Path.Combine(Path.GetTempPath(), "MwbLite-update"), ct).ConfigureAwait(false)).Path;
 
         /// <summary>A downloaded Setup and the SHA-256 (lower-case hex) it was verified against.</summary>
         internal sealed record VerifiedSetup(string Path, string Sha256);
 
-        /// <summary>Downloads the release's Setup into <paramref name="dir"/> and checks its SHA-256.</summary>
-        internal static async Task<VerifiedSetup> DownloadVerifiedAsync(ReleaseInfo r, IProgress<double> progress, string dir, CancellationToken ct)
+        /// <summary>
+        /// Downloads the release's checksum list and its signature, checks the signature with the release key and
+        /// returns the SHA-256 the signed list gives for Setup (lower-case hex). Throws ReleaseNotSignedException if
+        /// the release has no good signature, InvalidDataException if the signed list has no entry for Setup, and
+        /// HttpRequestException if a file can't be downloaded.
+        /// </summary>
+        internal static async Task<string> GetSignedSetupSha256Async(HttpClient http, ReleaseInfo r, CancellationToken ct)
         {
-            if (string.IsNullOrEmpty(r.SetupUrl) || !r.SetupUrl.StartsWith("https://github.com/" + Repo + "/releases/download/", StringComparison.OrdinalIgnoreCase))
+            if (!IsPinnedUrl(r.ChecksumsUrl) || !IsPinnedUrl(r.SignatureUrl))
+            {
+                throw NotSigned("the release has no SHA256SUMS.txt and SHA256SUMS.txt.sig from " + DownloadPrefix);
+            }
+
+            byte[] sums = await DownloadSmallAsync(http, r.ChecksumsUrl, MaxChecksumsBytes, ct).ConfigureAwait(false);
+            string sig = Encoding.ASCII.GetString(await DownloadSmallAsync(http, r.SignatureUrl, MaxSignatureBytes, ct).ConfigureAwait(false));
+            return SignedSha256(sums, sig, r.SetupName);
+        }
+
+        /// <summary>The SHA-256 the checksum list gives for <paramref name="fileName"/>, once its signature is verified (see above).</summary>
+        internal static string SignedSha256(byte[] sums, string sigBase64, string fileName)
+        {
+            if (!LiteReleaseKey.Verify(sums, sigBase64))
+            {
+                throw NotSigned(LiteReleaseKey.IsConfigured ? "the signature of SHA256SUMS.txt doesn't verify" : "this MwbLite has no release key built in");
+            }
+
+            return ShaFromSums(Encoding.UTF8.GetString(sums), fileName)
+                ?? throw new InvalidDataException("The release's signed checksum list has no entry for " + fileName + ", so it can't be verified.");
+        }
+
+        private static ReleaseNotSignedException NotSigned(string why)
+        {
+            LiteLog.Write(nameof(LiteUpdate), "Refusing the release: " + why + ".");
+            return new ReleaseNotSignedException();
+        }
+
+        private static async Task<byte[]> DownloadSmallAsync(HttpClient http, string url, int maxBytes, CancellationToken ct)
+        {
+            using HttpResponseMessage response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            using Stream src = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var buffer = new MemoryStream();
+            byte[] chunk = new byte[4096];
+            int n;
+            while ((n = await src.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
+            {
+                if (buffer.Length + n > maxBytes)
+                {
+                    throw new InvalidDataException("A release file is bigger than expected, so it was not used.");
+                }
+
+                buffer.Write(chunk, 0, n);
+            }
+
+            return buffer.ToArray();
+        }
+
+        /// <summary>
+        /// Null if <paramref name="r"/> is signed with the release key and can be installed; otherwise a message saying
+        /// why not. Downloads only the two small files. Network errors are thrown, not reported as "not signed".
+        /// </summary>
+        internal static async Task<string> CheckSignatureAsync(ReleaseInfo r, CancellationToken ct, HttpMessageHandler handler = null)
+        {
+            using HttpClient http = NewClient(TimeSpan.FromSeconds(30), handler);
+            try
+            {
+                _ = await GetSignedSetupSha256Async(http, r, ct).ConfigureAwait(false);
+                return null;
+            }
+            catch (Exception e) when (e is ReleaseNotSignedException or InvalidDataException)
+            {
+                return e.Message;
+            }
+        }
+
+        /// <summary>
+        /// Downloads the release's Setup into <paramref name="dir"/> and checks its SHA-256 against the release's signed
+        /// checksum list. Throws ReleaseNotSignedException, without downloading Setup, if the release isn't signed.
+        /// </summary>
+        internal static async Task<VerifiedSetup> DownloadVerifiedAsync(ReleaseInfo r, IProgress<double> progress, string dir, CancellationToken ct, HttpMessageHandler handler = null)
+        {
+            if (!IsPinnedUrl(r.SetupUrl))
             {
                 throw new InvalidOperationException("This release has no MwbLite Setup to download.");
             }
 
-            using HttpClient http = NewClient(TimeSpan.FromMinutes(10));
-            string expected = r.SetupSha256;
-            if (expected == null && !string.IsNullOrEmpty(r.ChecksumsUrl))
-            {
-                string sums = await http.GetStringAsync(r.ChecksumsUrl, ct).ConfigureAwait(false);
-                expected = ShaFromSums(sums, r.SetupName);
-            }
-
-            if (expected == null)
-            {
-                throw new InvalidOperationException("The release has no checksum for its Setup, so it can't be verified.");
-            }
+            using HttpClient http = NewClient(TimeSpan.FromMinutes(10), handler);
+            string expected = await GetSignedSetupSha256Async(http, r, ct).ConfigureAwait(false);
 
             Directory.CreateDirectory(dir);
             string path = Path.Combine(dir, Path.GetFileName(r.SetupName));
@@ -206,10 +315,10 @@ namespace MouseWithoutBorders.Lite
             if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
             {
                 File.Delete(path);
-                throw new InvalidDataException("The downloaded Setup doesn't match its published SHA-256, so it was deleted. Try again later.");
+                throw new InvalidDataException("The downloaded Setup doesn't match its signed SHA-256, so it was deleted. Try again later.");
             }
 
-            LiteLog.Write(nameof(LiteUpdate), $"Downloaded {r.SetupName} ({actual}).");
+            LiteLog.Write(nameof(LiteUpdate), $"Downloaded {r.SetupName} ({actual}); the checksum list is signed with the release key.");
             return new VerifiedSetup(path, actual.ToLowerInvariant());
         }
 
@@ -298,10 +407,11 @@ namespace MouseWithoutBorders.Lite
 
         /// <summary>
         /// Called from the tray timer: once a week (if checkForUpdates is on) asks GitHub for the latest release. If a
-        /// newer one is out and <paramref name="autoInstall"/> is on and the update task starts, calls
-        /// <paramref name="installing"/>; otherwise, the first time that release is seen, calls <paramref name="notify"/>.
+        /// newer one is out, signed with the release key, and <paramref name="autoInstall"/> is on and the update task
+        /// starts, calls <paramref name="installing"/>; otherwise, the first time that release is seen, calls
+        /// <paramref name="notify"/> (its second argument says whether the release is signed, i.e. can be installed).
         /// </summary>
-        internal static void MaybeCheckInBackground(bool enabled, bool autoInstall, Action<ReleaseInfo> notify, Action<ReleaseInfo> installing)
+        internal static void MaybeCheckInBackground(bool enabled, bool autoInstall, Action<ReleaseInfo, bool> notify, Action<ReleaseInfo> installing)
         {
             if (!enabled || DateTime.UtcNow - ReadState().LastCheckUtc < CheckInterval || Interlocked.Exchange(ref checking, 1) == 1)
             {
@@ -314,21 +424,33 @@ namespace MouseWithoutBorders.Lite
                 {
                     ReleaseInfo r = await GetLatestAsync(CancellationToken.None).ConfigureAwait(false);
                     CheckState s = ReadState();
-                    if (LiteAutoUpdate.ShouldInstallAutomatically(autoInstall, r, Current) && TryStartElevatedUpdate())
+                    bool newer = IsNewer(r);
+                    string unsigned = null;
+                    if (newer)
+                    {
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                        unsigned = await CheckSignatureAsync(r, cts.Token).ConfigureAwait(false);
+                        if (unsigned != null)
+                        {
+                            LiteLog.Write(nameof(LiteUpdate), $"{r.Version.ToString(3)} is out but can't be installed: {unsigned}");
+                        }
+                    }
+
+                    if (unsigned == null && LiteAutoUpdate.ShouldInstallAutomatically(autoInstall, r, Current) && TryStartElevatedUpdate())
                     {
                         s.NotifiedVersion = r.Version.ToString(3);
                         WriteState(s);
                         LiteLog.Write(nameof(LiteUpdate), $"Installing {r.Version.ToString(3)} automatically.");
                         installing(r);
                     }
-                    else if (IsNewer(r) && s.NotifiedVersion != r.Version.ToString(3))
+                    else if (newer && s.NotifiedVersion != r.Version.ToString(3))
                     {
                         s.NotifiedVersion = r.Version.ToString(3);
                         WriteState(s);
-                        notify(r);
+                        notify(r, unsigned == null);
                     }
                 }
-                catch (Exception e) when (e is HttpRequestException or TaskCanceledException or JsonException or IOException)
+                catch (Exception e) when (e is HttpRequestException or TaskCanceledException or JsonException or IOException or InvalidDataException)
                 {
                     // Offline or GitHub unreachable: try again next week (the timestamp is only written on success),
                     // but not for another day.

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Maintainer tool for signed releases (see tools\release-key.ps1). Not part of the app, the installer or the unit
+       tests; the empty Directory.Build.props / Directory.Packages.props next to this file keep the app's settings
+       (Windows desktop target, central package versions) away from it. No NuGet packages: everything is in .NET. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ReleaseSigner</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+</Project>
