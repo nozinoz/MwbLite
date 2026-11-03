@@ -49,6 +49,12 @@ namespace MouseWithoutBorders.Lite
         /// </summary>
         internal static Task<JsonObject> SendAsync(string peer, string op, JsonObject args, CancellationToken ct) => throw new NotImplementedException();
 
+        /// <summary>
+        /// Raised (on a worker thread) after a PC answers "hello": the engine says hello to each PC when it connects,
+        /// so subscribers learn every connected PC's version, MACs and screen. Arguments: the PC's layout name, its info.
+        /// </summary>
+        internal static event Action<string, PeerInfo> PeerHello;
+
         /// <summary>Asks a PC who it is. Null if it didn't answer. Also records its MAC addresses for Wake.</summary>
         internal static Task<PeerInfo> HelloAsync(string peer, CancellationToken ct) => throw new NotImplementedException();
     }
