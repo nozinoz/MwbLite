@@ -3,6 +3,12 @@
 Each version's section is also its GitHub Release notes (see `tools/publish-release.ps1`), and Settings > About
 shows them for the latest release. Upgrade every PC to the same version.
 
+## 0.8.2
+
+- **Same mouse speed on every PC is now on by default** for new installs: MwbLite sends the mouse's movement, so
+  each PC moves its pointer at its own speed instead of feeling slow on a lower-resolution screen. Existing
+  settings keep their value; turn it on under Settings > Advanced.
+
 ## 0.8.1
 
 - **Reconnects after sleep without re-pairing.** MwbLite used to try once on waking and then stop; if the other

@@ -48,6 +48,7 @@ public sealed class LiteConfigTests
         Assert.IsTrue(cfg.ShareClipboard);
         Assert.IsTrue(cfg.TransferFile);
         Assert.AreEqual(15100, cfg.Advanced.TcpPort);
+        Assert.IsTrue(cfg.Advanced.MoveMouseRelatively, "same mouse speed on every PC by default");
 
         File.WriteAllText(path, "{ \"user\": \"edited\" }");
         Assert.IsFalse(LiteConfig.WriteDefaultIfMissing(path));

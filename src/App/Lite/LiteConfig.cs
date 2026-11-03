@@ -95,7 +95,8 @@ namespace MouseWithoutBorders.Lite
 
             public bool BlockScreenSaverOnOtherMachines { get; set; } = true;
 
-            public bool MoveMouseRelatively { get; set; }
+            /// <summary>Send mouse movement rather than screen position, so each PC moves its pointer at its own speed.</summary>
+            public bool MoveMouseRelatively { get; set; } = true;
 
             public bool BlockMouseAtScreenCorners { get; set; }
 

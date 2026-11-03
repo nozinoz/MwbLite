@@ -321,7 +321,7 @@ next to it.
     "validateRemoteIp": false,
     "sameSubnetOnly": false,
     "blockScreenSaverOnOtherMachines": true,
-    "moveMouseRelatively": false,
+    "moveMouseRelatively": true,
     "blockMouseAtScreenCorners": false,
     "showClipboardAndNetworkStatusMessages": false,
     "allowInsecureConnections": false,
@@ -423,10 +423,11 @@ address each PC was last reached at (`addresses.json` next to settings.json) and
 resolve, as often happens in the first minutes after waking. The manual **Reconnect** hotkey (Win+Ctrl+Alt+R)
 still works.
 
-**Mouse speed on PCs with a different screen.** By default the cursor's position is sent as a fraction of the
-screen, so crossing another PC's screen takes the same hand movement as crossing this one's: on a laptop with a
-lower resolution than a 4K desktop it feels slow. Turn on **Same mouse speed on every PC** (Settings > Advanced)
-on the PC whose mouse you use: then the movement itself is sent, and each PC moves its pointer at its own speed.
+**Mouse speed on PCs with a different screen.** MwbLite sends the mouse's movement, so each PC moves its pointer
+at its own speed (**Same mouse speed on every PC**, Settings > Advanced, on by default since 0.8.2). Upstream sends
+the cursor's position as a fraction of the screen instead, so crossing another PC's screen takes the same hand
+movement as crossing this one's, which feels slow on a laptop next to a 4K desktop; turn the option off to get
+that behaviour. Settings files from before 0.8.2 keep the value they had (off unless you changed it).
 
 **Layout** (machine order, one row or two, wrap) is shared. A change made in Settings on one PC is sent to the
 connected PCs, and each saves it to its own settings.json. MwbLite also pre-loads the configured names into MWB's
