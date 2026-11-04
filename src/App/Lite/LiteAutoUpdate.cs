@@ -1,9 +1,12 @@
 // MwbLite: updating by itself, and together with the other PCs. The decisions are small pure functions (tested in
 // UpdateTests); this file only wires them to GitHub, the update task and the control channel (LiteControl).
 //
-// Automatic updates (installUpdatesAutomatically): LiteUpdate's weekly check starts the update task when it finds a
-// newer release that is signed with the release key; ShouldInstallAutomatically is its rule. The same goes for updates
-// started by a peer: the update task checks the signature itself, and a release that isn't signed is only announced.
+// Automatic updates (installUpdatesAutomatically): LiteUpdate asks GitHub every 24 hours (and as soon as the switch is
+// turned on). A newer release signed with the release key waits until the PC has been idle for a few minutes, then the
+// update task installs it silently and restarts MwbLite; no notification is shown. If a check finds we still run the
+// old version after its install was started, that failed: the user is told once, and it is tried again a day later. ShouldInstallAutomatically and
+// ShouldStartPendingInstall are the rules. Updates started by a peer go through the same task, which checks the
+// signature itself; a release that isn't signed is only announced.
 //
 // Update together (updateWithOtherPcs, on by default). PCs must run the same version to connect, so:
 // - When this PC says hello to a connected PC that runs an older MwbLite, it sends "update-available" with its own
@@ -61,9 +64,29 @@ namespace MouseWithoutBorders.Lite
         /// <summary>True if <paramref name="candidate"/> is a version newer than <paramref name="current"/>.</summary>
         internal static bool IsNewerThan(Version candidate, Version current) => candidate != null && current != null && candidate > current;
 
-        /// <summary>The weekly check found <paramref name="release"/>: install it by itself?</summary>
+        /// <summary>The check found <paramref name="release"/>: install it by itself?</summary>
         internal static bool ShouldInstallAutomatically(bool enabled, ReleaseInfo release, Version current) =>
             enabled && release != null && !string.IsNullOrEmpty(release.SetupUrl) && IsNewerThan(release.Version, current);
+
+        /// <summary>How often GitHub is asked when updates install by themselves (otherwise weekly).</summary>
+        internal static readonly TimeSpan AutoCheckInterval = TimeSpan.FromHours(24);
+
+        /// <summary>An automatic update waits until nobody has used this PC (or controlled it from another) for this long.</summary>
+        internal static readonly TimeSpan IdleBeforeInstall = TimeSpan.FromMinutes(3);
+
+        /// <summary>A version whose automatic install was started is not started again for this long (if we still run the old one, it failed).</summary>
+        internal static readonly TimeSpan RetryInstallAfter = TimeSpan.FromHours(24);
+
+        /// <summary>How long since the last check before asking GitHub again.</summary>
+        internal static TimeSpan CheckIntervalFor(bool autoInstall) => autoInstall ? AutoCheckInterval : LiteUpdate.CheckInterval;
+
+        /// <summary>True if the automatic install of <paramref name="version"/> was started within the retry window.</summary>
+        internal static bool RecentlyTried(string version, string triedVersion, DateTime triedUtc, DateTime nowUtc) =>
+            string.Equals(version, triedVersion, StringComparison.Ordinal) && nowUtc >= triedUtc && nowUtc - triedUtc < RetryInstallAfter;
+
+        /// <summary>A newer release waits to be installed by itself: start it now? Only once the PC has been idle a few minutes.</summary>
+        internal static bool ShouldStartPendingInstall(TimeSpan idle, string version, string triedVersion, DateTime triedUtc, DateTime nowUtc) =>
+            idle >= IdleBeforeInstall && !RecentlyTried(version, triedVersion, triedUtc, nowUtc);
 
         /// <summary>This PC is connected to one running <paramref name="peer"/>: tell it to update?</summary>
         internal static bool ShouldAnnounceToPeer(bool enabled, Version ours, Version peer) => enabled && peer != null && IsNewerThan(ours, peer);
@@ -260,7 +283,11 @@ namespace MouseWithoutBorders.Lite
                 }
                 else if (action == PeerUpdateAction.UpdateNow && LiteUpdate.TryStartElevatedUpdate())
                 {
-                    LiteTray.NotifyUpdate($"Updating MwbLite to {latest.Version.ToString(3)}… ({from} already runs it.)");
+                    LiteLog.Write(nameof(LiteAutoUpdate), $"Updating to {latest.Version.ToString(3)} ({from} already runs it).");
+                    if (!Setting.Values.InstallUpdatesAutomatically)
+                    {
+                        LiteTray.NotifyUpdate($"Updating MwbLite to {latest.Version.ToString(3)}… ({from} already runs it.)");
+                    }
                 }
                 else if (action != PeerUpdateAction.Ignore)
                 {

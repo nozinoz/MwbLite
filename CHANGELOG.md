@@ -3,6 +3,14 @@
 Each version's section is also its GitHub Release notes (see `tools/publish-release.ps1`), and Settings > About
 shows them for the latest release. Upgrade every PC to the same version.
 
+## 0.9.1
+
+- **Install updates automatically now really keeps MwbLite up to date, silently.** With the switch on, MwbLite asks
+  GitHub every 24 hours instead of weekly (and right away when you turn it on), even if "Check for updates every week"
+  is off. A new version is installed in the background once nobody has used the PC for 3 minutes, so it never
+  interrupts you, and there are no notifications. An install that fails is retried a day later, and you are told once
+  that the update is available.
+
 ## 0.9.0
 
 **Upgrade every PC to 0.9.0.** The new features below use a new connection between MwbLite PCs (TCP port

@@ -447,7 +447,7 @@ next to it.
 | `useService` | `false` | Use MwbLite.Service, so MWB controls the lock screen, Ctrl+Alt+Del and UAC prompts. Needs `--install`. Takes effect after a restart. |
 | `notifyConnectionChanges` | `true` | Notify when a PC that was connected has been gone for 20 seconds, and when it is back (see [Connection notices](#connection-notices)). |
 | `checkForUpdates` | `true` | Ask GitHub once a week whether a new version is out (see [Updates](#updates-and-the-about-page)). |
-| `installUpdatesAutomatically` | `false` | When the weekly check finds a new version, install it without asking. Only works if MwbLite was installed with Setup (the update task). |
+| `installUpdatesAutomatically` | `false` | Keep MwbLite up to date silently: check every 24 hours and install a new version once the PC has been idle for 3 minutes. Only works if MwbLite was installed with Setup (the update task). |
 | `updateWithOtherPcs` | `true` | Update this PC when a connected PC announces a newer MwbLite, and tell connected PCs that run an older one. Only ever installs the latest GitHub release. |
 | `advanced.tcpPort` | `15100` | MWB uses `tcpPort` (clipboard and files) and `tcpPort+1` (input and control); MwbLite's control connection uses `tcpPort+3`. 1024 to 65532. Must match on every PC. Takes effect after a restart. |
 | `advanced.edgeAlignment` | `[]` | Where a PC's screen sits along its neighbour's edge, per pair: `from` is the left (upper) PC, `to` the right (lower) one, `start` and `end` are fractions of the `from` edge (0 = top or left, 1 = bottom or right; a bigger screen goes below 0 or above 1). No entry means 0 to 1, MWB's own mapping. Set it in Settings > PCs > Line up screens; it is kept the same on every PC. |
@@ -750,9 +750,13 @@ version carries a new key. Run `-New` before building the first release that con
 the public key, and every update after it must be signed. While `LiteReleaseKey.cs` still has its placeholder, a
 build installs no update at all.
 
-**Install updates automatically** (About; off by default, `installUpdatesAutomatically`). When the weekly check finds
-a newer release, MwbLite starts the update task by itself and a notification says it is updating and will restart. It
-needs "Check for updates every week" and the task, so it is greyed out on copies that weren't installed with Setup.
+**Install updates automatically** (About; off by default, `installUpdatesAutomatically`). Keeps MwbLite up to date
+by itself: it asks GitHub every 24 hours (and right away when the switch is turned on, or MwbLite starts with it on),
+works whether or not "Check for updates every week" is on, and installs a newer signed release silently in the
+background once nobody has used the PC (or controlled it from another PC) for 3 minutes, then restarts MwbLite. There
+is no prompt and no notification; `update.log` and MwbLite's log record it. If an install doesn't take, the next check
+shows the usual "is available" notification once, and the automatic install is tried again a day later. It needs the
+update task, so it is greyed out on copies that weren't installed with Setup.
 
 **Update together with my other PCs** (About; on by default, `updateWithOtherPcs`). PCs must run the same version to
 connect, so when a PC that this one connects to runs an older MwbLite that has the control connection (0.9.0 or

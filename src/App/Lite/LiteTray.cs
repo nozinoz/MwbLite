@@ -267,6 +267,9 @@ namespace MouseWithoutBorders.Lite
         private static bool balloonClickHooked;
         private static bool olderVersionNotified;
         private static bool statusDirReady;
+        private static bool lastAutoInstall;
+        private static ulong lastInputCount;
+        private static DateTime lastInputUtc = DateTime.UtcNow;
 
         // Balloons when a PC drops off or comes back (the rules are in LiteConnectionNotices).
         private static readonly LiteConnectionNotices ConnectionNotices = new(Process.GetCurrentProcess().StartTime.ToUniversalTime());
@@ -308,8 +311,18 @@ namespace MouseWithoutBorders.Lite
 
                 if (timerTicks % 600 == 0)
                 {
-                    CheckForUpdate(); // the check itself runs at most once a week
+                    CheckForUpdate(); // the check itself runs weekly, or daily with automatic updates
                 }
+
+                // Idle = no keyboard or mouse input here, local or from a PC controlling this one.
+                ulong inputs = Event.InputEventCount;
+                if (inputs != lastInputCount)
+                {
+                    lastInputCount = inputs;
+                    lastInputUtc = now;
+                }
+
+                LiteUpdate.MaybeInstallPending(now - lastInputUtc, Setting.Values.InstallUpdatesAutomatically);
 
                 StatusSnapshot status = LiteStatus.Refresh();
                 Redial(status, now);
@@ -364,17 +377,21 @@ namespace MouseWithoutBorders.Lite
             }
         }
 
-        // Weekly update check; the notification opens Settings > About, where Update is. With "install updates
-        // automatically" the update task is started instead, and the notification only says so.
+        // Update check; the notification opens Settings > About, where Update is. With "install updates automatically"
+        // a new version is installed silently once the PC is idle (MaybeInstallPending) and there is no notification.
+        // Turning the switch on (or starting with it on) checks right away.
         private static void CheckForUpdate()
         {
+            bool auto = Setting.Values.InstallUpdatesAutomatically;
+            bool force = auto && !lastAutoInstall;
+            lastAutoInstall = auto;
             LiteUpdate.MaybeCheckInBackground(
                 Setting.Values.CheckForUpdates,
-                Setting.Values.InstallUpdatesAutomatically,
+                auto,
+                force,
                 (r, signed) => NotifyUpdate(signed
                     ? $"MwbLite {r.Version.ToString(3)} is available (you have {LiteUpdate.CurrentText}). Click here, or open Settings > About, to update."
-                    : $"MwbLite {r.Version.ToString(3)} is available, but it isn't signed with MwbLite's release key, so it can't be installed automatically. Click here for details."),
-                r => NotifyUpdate($"Updating MwbLite to {r.Version.ToString(3)}… MwbLite will restart."));
+                    : $"MwbLite {r.Version.ToString(3)} is available, but it isn't signed with MwbLite's release key, so it can't be installed automatically. Click here for details."));
         }
 
         /// <summary>An update notification (any thread); clicking it opens Settings > About.</summary>

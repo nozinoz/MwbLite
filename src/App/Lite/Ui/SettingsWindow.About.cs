@@ -74,7 +74,7 @@ namespace MouseWithoutBorders.Lite.Ui
                 updates,
                 Kit.Row("", "Check for updates every week", "Asks GitHub once a week whether a new version is out and shows a notification. Nothing about you or this PC is sent.", checkForUpdates),
                 Kit.Row("", "Install updates automatically", canAutoInstall
-                    ? "When the weekly check finds a new version, install it and restart MwbLite, without asking. Needs \"Check for updates every week\"."
+                    ? "Keeps MwbLite up to date by itself: checks every 24 hours, and installs a new version in the background once nobody has used this PC for a few minutes. No prompts, no notifications."
                     : "Only when MwbLite was installed with Setup. Installing the new version then needs no administrator prompt.", installUpdatesAutomatically),
                 Kit.Row("", "Update together with my other PCs", "When another of your PCs runs a newer MwbLite, update this PC too, and tell connected PCs that are older. Only ever installs the latest release from GitHub.", updateWithOtherPcs),
                 Kit.Section("Details"),

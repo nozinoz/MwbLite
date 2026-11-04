@@ -366,6 +366,11 @@ namespace MouseWithoutBorders.Lite
             public string LatestVersion { get; set; } = string.Empty;
 
             public string NotifiedVersion { get; set; } = string.Empty;
+
+            /// <summary>The version whose automatic install was last started, and when.</summary>
+            public string AutoInstallVersion { get; set; } = string.Empty;
+
+            public DateTime AutoInstallUtc { get; set; }
         }
 
         private static string StateFile => Path.Combine(LitePaths.ConfigDir, "update.json");
@@ -405,15 +410,20 @@ namespace MouseWithoutBorders.Lite
             WriteState(s);
         }
 
+        // A newer signed release found by the check, waiting for the PC to be idle (automatic updates only).
+        private static ReleaseInfo pendingInstall;
+
         /// <summary>
-        /// Called from the tray timer: once a week (if checkForUpdates is on) asks GitHub for the latest release. If a
-        /// newer one is out, signed with the release key, and <paramref name="autoInstall"/> is on and the update task
-        /// starts, calls <paramref name="installing"/>; otherwise, the first time that release is seen, calls
+        /// Called from the tray timer: asks GitHub for the latest release once a week if checkForUpdates is on, every 24
+        /// hours if <paramref name="autoInstall"/> is on, or now if <paramref name="force"/>. If a newer one is out,
+        /// signed with the release key, and it can install by itself (autoInstall and the update task), it is kept for
+        /// <see cref="MaybeInstallPending"/>, silently. Otherwise, the first time that release is seen, calls
         /// <paramref name="notify"/> (its second argument says whether the release is signed, i.e. can be installed).
         /// </summary>
-        internal static void MaybeCheckInBackground(bool enabled, bool autoInstall, Action<ReleaseInfo, bool> notify, Action<ReleaseInfo> installing)
+        internal static void MaybeCheckInBackground(bool enabled, bool autoInstall, bool force, Action<ReleaseInfo, bool> notify)
         {
-            if (!enabled || DateTime.UtcNow - ReadState().LastCheckUtc < CheckInterval || Interlocked.Exchange(ref checking, 1) == 1)
+            if (!(enabled || autoInstall) || (!force && DateTime.UtcNow - ReadState().LastCheckUtc < LiteAutoUpdate.CheckIntervalFor(autoInstall)) ||
+                Interlocked.Exchange(ref checking, 1) == 1)
             {
                 return;
             }
@@ -436,16 +446,19 @@ namespace MouseWithoutBorders.Lite
                         }
                     }
 
-                    if (unsigned == null && LiteAutoUpdate.ShouldInstallAutomatically(autoInstall, r, Current) && TryStartElevatedUpdate())
+                    string version = r?.Version.ToString(3);
+                    if (unsigned == null && LiteAutoUpdate.ShouldInstallAutomatically(autoInstall, r, Current) &&
+                        !LiteAutoUpdate.RecentlyTried(version, s.AutoInstallVersion, s.AutoInstallUtc, DateTime.UtcNow) && CanUpdateWithoutPrompt())
                     {
-                        s.NotifiedVersion = r.Version.ToString(3);
-                        WriteState(s);
-                        LiteLog.Write(nameof(LiteUpdate), $"Installing {r.Version.ToString(3)} automatically.");
-                        installing(r);
+                        if (Interlocked.Exchange(ref pendingInstall, r)?.Version != r.Version)
+                        {
+                            LiteLog.Write(nameof(LiteUpdate), $"{version} is out; it will be installed once this PC has been idle for {LiteAutoUpdate.IdleBeforeInstall.TotalMinutes:0} minutes.");
+                        }
                     }
-                    else if (newer && s.NotifiedVersion != r.Version.ToString(3))
+                    else if (newer && s.NotifiedVersion != version)
                     {
-                        s.NotifiedVersion = r.Version.ToString(3);
+                        // Includes an automatic install that was started but didn't take: say once that it is available.
+                        s.NotifiedVersion = version;
                         WriteState(s);
                         notify(r, unsigned == null);
                     }
@@ -463,6 +476,44 @@ namespace MouseWithoutBorders.Lite
                 {
                     Interlocked.Exchange(ref checking, 0);
                 }
+            });
+        }
+
+        /// <summary>
+        /// Called from the tray timer every second with how long nobody has used this PC: starts the update task for a
+        /// release <see cref="MaybeCheckInBackground"/> found, once the PC has been idle long enough. Silent; the
+        /// update restarts MwbLite. Turning <paramref name="autoInstall"/> off drops a waiting release.
+        /// </summary>
+        internal static void MaybeInstallPending(TimeSpan idle, bool autoInstall)
+        {
+            ReleaseInfo r = Volatile.Read(ref pendingInstall);
+            if (r == null || (autoInstall && idle < LiteAutoUpdate.IdleBeforeInstall) || Interlocked.CompareExchange(ref pendingInstall, null, r) != r)
+            {
+                return;
+            }
+
+            if (!autoInstall)
+            {
+                LiteLog.Write(nameof(LiteUpdate), "Automatic updates were turned off; not installing " + r.Version.ToString(3) + ".");
+                return;
+            }
+
+            _ = Task.Run(() =>
+            {
+                string version = r.Version.ToString(3);
+                CheckState s = ReadState();
+                DateTime now = DateTime.UtcNow;
+                if (!LiteAutoUpdate.ShouldStartPendingInstall(idle, version, s.AutoInstallVersion, s.AutoInstallUtc, now))
+                {
+                    return;
+                }
+
+                s.AutoInstallVersion = version;
+                s.AutoInstallUtc = now;
+                WriteState(s);
+                LiteLog.Write(nameof(LiteUpdate), TryStartElevatedUpdate()
+                    ? $"Installing {version} automatically (this PC has been idle for {idle.TotalMinutes:0} minutes)."
+                    : $"Could not start the automatic update to {version}.");
             });
         }
     }

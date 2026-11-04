@@ -45,6 +45,28 @@ public sealed class AutoUpdateTests
     }
 
     [TestMethod]
+    public void AutomaticUpdatesCheckDailyOtherwiseWeekly()
+    {
+        Assert.AreEqual(TimeSpan.FromHours(24), LiteAutoUpdate.CheckIntervalFor(true));
+        Assert.AreEqual(LiteUpdate.CheckInterval, LiteAutoUpdate.CheckIntervalFor(false));
+        Assert.AreEqual(TimeSpan.FromDays(7), LiteUpdate.CheckInterval);
+    }
+
+    [TestMethod]
+    public void PendingUpdateWaitsForIdleAndIsNotRetriedWithinADay()
+    {
+        DateTime now = new(2026, 11, 4, 12, 0, 0, DateTimeKind.Utc);
+        TimeSpan idle = LiteAutoUpdate.IdleBeforeInstall;
+
+        Assert.IsTrue(LiteAutoUpdate.ShouldStartPendingInstall(idle, "0.9.1", string.Empty, default, now), "idle, never tried");
+        Assert.IsFalse(LiteAutoUpdate.ShouldStartPendingInstall(idle - TimeSpan.FromSeconds(1), "0.9.1", string.Empty, default, now), "PC in use");
+        Assert.IsFalse(LiteAutoUpdate.ShouldStartPendingInstall(idle, "0.9.1", "0.9.1", now.AddHours(-23), now), "tried this version within a day");
+        Assert.IsTrue(LiteAutoUpdate.ShouldStartPendingInstall(idle, "0.9.1", "0.9.1", now.AddHours(-25), now), "tried more than a day ago");
+        Assert.IsTrue(LiteAutoUpdate.ShouldStartPendingInstall(idle, "0.9.2", "0.9.1", now.AddMinutes(-5), now), "a different version");
+        Assert.IsTrue(LiteAutoUpdate.ShouldStartPendingInstall(idle, "0.9.1", "0.9.1", now.AddHours(2), now), "clock set back doesn't block");
+    }
+
+    [TestMethod]
     public void OlderConnectedPcsAreToldOnlyWhenOn()
     {
         Assert.IsTrue(LiteAutoUpdate.ShouldAnnounceToPeer(true, V091, V090));
