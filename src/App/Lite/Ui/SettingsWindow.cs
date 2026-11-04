@@ -580,6 +580,13 @@ namespace MouseWithoutBorders.Lite.Ui
         private bool Apply()
         {
             var cfg = ReadValues();
+
+            // Another PC may have changed the layout or the screen alignment since this window loaded them: keep that
+            // unless it was changed here too.
+            LiteConfig merged = LiteConfig.KeepPeerChanges(cfg, loaded, File.Exists(settingsPath) ? LiteConfig.TryParse(settingsPath, out _) : null);
+            bool keptPeerChanges = !ReferenceEquals(merged, cfg);
+            cfg = merged;
+
             var errors = cfg.Validate(out _);
             if (errors.Count > 0)
             {
@@ -618,8 +625,13 @@ namespace MouseWithoutBorders.Lite.Ui
             }
 
             loaded = cfg;
+            if (keptPeerChanges)
+            {
+                LoadValues(cfg); // show the layout / alignment that came from the other PC
+            }
+
             baseline = Canonical(cfg);
-            SetMessage("Applied.", ok: true);
+            SetMessage(keptPeerChanges ? "Applied. The layout or screen alignment changed on another PC meanwhile; that is kept and shown here." : "Applied.", ok: true);
             afterSave?.Invoke(cfg);
             return true;
         }

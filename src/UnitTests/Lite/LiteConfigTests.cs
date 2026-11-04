@@ -297,4 +297,59 @@ public sealed class LiteConfigTests
         Assert.AreEqual(string.Empty, parsed.SecurityKey);
         Assert.IsFalse(LiteConfig.ProtectPlainKeyInFile(path));
     }
+
+    private static LiteConfig Cfg(double start, params string[] machines)
+    {
+        var c = LiteConfig.CreateDefault();
+        c.Machines = machines.ToList();
+        c.Layout.OneRow = true;
+        c.Advanced.EdgeAlignment = start == 0 ? new() : new() { new EdgeAlignmentEntry { From = machines[0], To = machines[1], Start = start, End = start + 1 } };
+        return c;
+    }
+
+    [TestMethod]
+    public void ApplyKeepsAlignmentChangedOnAnotherPcWhileSettingsWasOpen()
+    {
+        LiteConfig loaded = Cfg(0.1, "A", "B");
+        LiteConfig edited = loaded.Clone();
+        edited.ShareClipboard = !edited.ShareClipboard; // something else changed in the window
+        LiteConfig onDisk = Cfg(0.3, "A", "B");          // the other PC's alignment arrived meanwhile
+
+        LiteConfig saved = LiteConfig.KeepPeerChanges(edited, loaded, onDisk);
+
+        Assert.AreEqual(0.3, saved.Advanced.EdgeAlignment.Single().Start, "the other PC's alignment is kept");
+        Assert.AreEqual(edited.ShareClipboard, saved.ShareClipboard, "the window's own change is saved");
+    }
+
+    [TestMethod]
+    public void ApplyKeepsAlignmentEditedHereOverTheOtherPcs()
+    {
+        LiteConfig loaded = Cfg(0.1, "A", "B");
+        LiteConfig edited = Cfg(0.2, "A", "B");
+        LiteConfig onDisk = Cfg(0.3, "A", "B");
+
+        Assert.AreSame(edited, LiteConfig.KeepPeerChanges(edited, loaded, onDisk));
+    }
+
+    [TestMethod]
+    public void ApplyKeepsLayoutChangedOnAnotherPcUnlessChangedHere()
+    {
+        LiteConfig loaded = Cfg(0, "A", "B");
+        LiteConfig onDisk = Cfg(0, "B", "A");
+
+        LiteConfig untouched = LiteConfig.KeepPeerChanges(loaded.Clone(), loaded, onDisk);
+        CollectionAssert.AreEqual(onDisk.MatrixSlots(), untouched.MatrixSlots(), "the other PC's layout is kept");
+
+        LiteConfig edited = Cfg(0, "A", "B", "C");
+        Assert.AreSame(edited, LiteConfig.KeepPeerChanges(edited, loaded, onDisk), "a layout changed here wins");
+    }
+
+    [TestMethod]
+    public void ApplyWithNothingChangedElsewhereSavesTheWindowAsIs()
+    {
+        LiteConfig loaded = Cfg(0.1, "A", "B");
+        LiteConfig edited = loaded.Clone();
+        Assert.AreSame(edited, LiteConfig.KeepPeerChanges(edited, loaded, loaded.Clone()));
+        Assert.AreSame(edited, LiteConfig.KeepPeerChanges(edited, loaded, null!), "file unreadable");
+    }
 }

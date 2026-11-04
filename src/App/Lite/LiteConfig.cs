@@ -489,6 +489,48 @@ namespace MouseWithoutBorders.Lite
             return JsonSerializer.Deserialize<LiteConfig>(JsonSerializer.Serialize(this, JsonOptions), JsonOptions);
         }
 
+        /// <summary>
+        /// The config the Settings window should save. Another PC can change the layout and the screen alignment in
+        /// settings.json while the window is open (LiteLayoutSync, LiteAlignmentSync); those values are taken from
+        /// <paramref name="onDisk"/> unless they were changed in the window (<paramref name="edited"/> differs from
+        /// <paramref name="loaded"/>, what the window started from), so an Apply for something else doesn't undo them.
+        /// Returns <paramref name="edited"/> itself if nothing on disk needs keeping.
+        /// </summary>
+        internal static LiteConfig KeepPeerChanges(LiteConfig edited, LiteConfig loaded, LiteConfig onDisk)
+        {
+            if (onDisk == null || loaded == null)
+            {
+                return edited;
+            }
+
+            static bool SameLayout(LiteConfig a, LiteConfig b) =>
+                a.MatrixSlots().SequenceEqual(b.MatrixSlots()) && a.Layout.OneRow == b.Layout.OneRow && a.Layout.WrapMouse == b.Layout.WrapMouse;
+
+            bool layoutEdited = !SameLayout(edited, loaded);
+            bool alignmentEdited = LiteEdgeAlignment.Canonical(edited.Advanced.EdgeAlignment) !=
+                LiteEdgeAlignment.Canonical(LiteEdgeAlignment.ForLayout(loaded.Advanced.EdgeAlignment, edited.MatrixSlots(), edited.Layout.OneRow));
+            bool layoutFromDisk = !layoutEdited && !SameLayout(edited, onDisk);
+            bool alignmentFromDisk = !alignmentEdited &&
+                LiteEdgeAlignment.Canonical(edited.Advanced.EdgeAlignment) != LiteEdgeAlignment.Canonical(onDisk.Advanced.EdgeAlignment);
+            if (!layoutFromDisk && !alignmentFromDisk)
+            {
+                return edited;
+            }
+
+            LiteConfig merged = edited.Clone();
+            if (layoutFromDisk)
+            {
+                merged.Machines = onDisk.Machines.ToList();
+                merged.Layout.OneRow = onDisk.Layout.OneRow;
+                merged.Layout.WrapMouse = onDisk.Layout.WrapMouse;
+            }
+
+            List<EdgeAlignmentEntry> alignment = alignmentFromDisk ? onDisk.Advanced.EdgeAlignment : edited.Advanced.EdgeAlignment;
+            merged.Advanced.EdgeAlignment = LiteEdgeAlignment.ForLayout(alignment, merged.MatrixSlots(), merged.Layout.OneRow);
+            merged.Normalize();
+            return merged;
+        }
+
         internal HotkeySettings Hotkey(string value) => TryParseHotkey(value, out var hk) ? hk : new HotkeySettings();
 
         private IEnumerable<(string Name, string Value)> HotkeyStrings()

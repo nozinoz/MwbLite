@@ -3,6 +3,13 @@
 Each version's section is also its GitHub Release notes (see `tools/publish-release.ps1`), and Settings > About
 shows them for the latest release. Upgrade every PC to the same version.
 
+## 0.9.2
+
+- **Fixed: screen alignment (and layout) changed on one PC was undone by the other.** A Settings window left open on
+  a PC kept the values it had loaded, so pressing Apply there, even for an unrelated setting, saved its old screen
+  alignment and layout over the ones just synced from the other PC, and sent them back. Apply now keeps what another PC
+  changed meanwhile unless you changed the same thing in this window, and shows it.
+
 ## 0.9.1
 
 - **Install updates automatically now really keeps MwbLite up to date, silently.** With the switch on, MwbLite asks
