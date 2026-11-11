@@ -81,11 +81,15 @@ public sealed class StatusTests
         Assert.AreEqual(0.75, t.Fraction, 1e-9);
         StringAssert.Contains(LiteTransfers.Describe(t, DateTime.UtcNow), "3.0 GB of 4.0 GB");
 
+        // Cancel ends the entry itself: a copy stuck after its network part (where closing the socket does
+        // nothing) must still leave the window.
         LiteTransfers.Cancel(t.Id);
         Assert.IsTrue(t.Cancelled);
+        Assert.IsFalse(t.IsActive);
         Assert.IsTrue(LiteTransfers.Snapshot(DateTime.UtcNow).Any(x => x.Id == t.Id));
+        Assert.AreEqual("Cancelled", LiteTransfers.Describe(t, DateTime.UtcNow));
 
-        t.EndedUtc = DateTime.UtcNow; // (Complete also notifies, which needs the app's settings)
+        LiteTransfers.Complete(t); // the copy's own thread finishing later changes nothing
         Assert.AreEqual("Cancelled", LiteTransfers.Describe(t, DateTime.UtcNow));
         Assert.IsFalse(LiteTransfers.Snapshot(DateTime.UtcNow + LiteTransfers.KeepFinished + TimeSpan.FromSeconds(1)).Any(x => x.Id == t.Id));
     }

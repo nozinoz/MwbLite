@@ -846,15 +846,33 @@ internal static class Clipboard
                             received,
                             remoteMachine);
 
-                        _ = Launch.ImpersonateLoggedOnUserAndDoSomething(() =>
+                        // MwbLite: open the folder on its own thread. The shell call behind Process.Start can block
+                        // indefinitely now and then, which left the copy at 100% and refused every later copy.
+                        string folderToOpen = savingFolder;
+                        new System.Threading.Thread(
+                            () =>
+                            {
+                                try
+                                {
+                                    _ = Launch.ImpersonateLoggedOnUserAndDoSomething(() =>
+                                    {
+                                        ProcessStartInfo startInfo = new();
+                                        startInfo.UseShellExecute = true;
+                                        startInfo.WorkingDirectory = folderToOpen;
+                                        startInfo.FileName = folderToOpen;
+                                        startInfo.Verb = "open";
+                                        _ = Process.Start(startInfo);
+                                    });
+                                }
+                                catch (Exception e)
+                                {
+                                    Logger.Log(e);
+                                }
+                            })
                         {
-                            ProcessStartInfo startInfo = new();
-                            startInfo.UseShellExecute = true;
-                            startInfo.WorkingDirectory = savingFolder;
-                            startInfo.FileName = savingFolder;
-                            startInfo.Verb = "open";
-                            _ = Process.Start(startInfo);
-                        });
+                            IsBackground = true,
+                            Name = "MwbLite open received folder",
+                        }.Start();
                     }
                     else if (postAct.Contains("mspaint"))
                     {

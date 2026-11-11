@@ -3,6 +3,14 @@
 Each version's section is also its GitHub Release notes (see `tools/publish-release.ps1`), and Settings > About
 shows them for the latest release. Upgrade every PC to the same version.
 
+## 0.9.3
+
+- **Fixed: a dragged file could get stuck at 100%.** After a file arrived, MwbLite opened the
+  `Desktop\MouseWithoutBorders` folder and only then marked the copy done. Now and then Windows never returned from
+  opening that folder, so the progress window stayed at 100%, Cancel did nothing, and every later copy to that PC was
+  refused until MwbLite restarted. The folder now opens separately, and the copy is done as soon as the file is saved.
+  Cancel also closes a copy that is stuck for any other reason.
+
 ## 0.9.2
 
 - **Fixed: screen alignment (and layout) changed on one PC was undone by the other.** A Settings window left open on

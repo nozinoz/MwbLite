@@ -73,6 +73,7 @@ Record each result in the **Result** column of each table (✅ pass / ❌ fail /
 | 4.10 | **Large folder (drag, optional):** drag a folder of several GB from A to B. | It arrives. If B says "still being packed", drop again a little later. | |
 | 4.11 | **Progress:** drag a file of 500 MB or more from A to B. | On both PCs a small window at the bottom right shows the name, "Sending to B" / "Receiving from A", a moving bar and the speed. It doesn't take the keyboard focus. When done it shows "Sent"/"Received", closes after a few seconds, and a notification on B says it arrived. | |
 | 4.12 | **Cancel:** drag the same large file again and press **Cancel** halfway (try once on A, once on B). | Both windows show the copy as cancelled or failed. No partial file is left in `Desktop\MouseWithoutBorders` on B. | |
+| 4.12a | **Many drags in a row:** drag 10 files one after another from A to B, each as soon as the previous one shows "Received". | Every copy finishes; the window never stays at 100%. The folder on B opens (or comes to the front) each time. | |
 | 4.13 | **Preparing:** drag a folder of a few GB. | The window first shows "Preparing (zipping)…" with a moving bar, then the progress. | |
 | 4.14 | **Tray tooltip during a copy:** hover over the tray icon while 4.11 runs. | It shows the file name and percentage. | |
 

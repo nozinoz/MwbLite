@@ -118,7 +118,7 @@ namespace MouseWithoutBorders.Lite
             string outcome = t.Succeeded ? "done" : t.Cancelled ? "cancelled" : "failed: " + (t.Error ?? "connection closed");
             LiteLog.Write(nameof(LiteTransfers), $"#{t.Id} {outcome} ({t.Done} of {t.Total} bytes)");
 
-            if (Setting.Values.ShowTransferProgress && !Setting.Values.ShowClipNetStatus && !t.Cancelled)
+            if (!t.Cancelled && Setting.Values.ShowTransferProgress && !Setting.Values.ShowClipNetStatus)
             {
                 // (With "status messages" on, MWB shows its own balloons for the same events.)
                 string text = t.Succeeded
@@ -158,6 +158,10 @@ namespace MouseWithoutBorders.Lite
             catch (Exception e) when (e is SocketException or ObjectDisposedException)
             {
             }
+
+            // Take it off the list now even if the copy's thread is stuck past the network part, where closing the
+            // socket has no effect. The thread's own Complete later does nothing.
+            Complete(t);
         }
 
         /// <summary>Active transfers plus ones that finished within <see cref="KeepFinished"/>.</summary>
